@@ -21,12 +21,12 @@ int port;
 int stat_ms;
 char stat[200];
 
-int bsize;
-int bufsize;
+long bsize;
+long bufsize;
 
-int pktrate;
+long pktrate;
 
-int num;
+long long num;
 
 int proto;
 
@@ -36,11 +36,11 @@ char hostname[100];
 
 void encode_header(char *buffer, int number){
 	//support maximum sequence number 10000 packages
-	sprintf(buffer, "%d%d%d%d", number/1000, (number%1000)/100, (number%100)/10, number%10);
+	sprintf(buffer, "%d%d%d%d%d%d%d%d", number/10000000, (number%10000000)/1000000, (number%1000000)/100000, (number%100000)/10000, (number%10000)/1000, (number%1000)/100, (number%100)/10, number%10);
 }	
 
-int decode_header(char *buffer){
-	return atoi(buffer);
+long long decode_header(char *buffer){
+	return atoll(buffer);
 }
 
 int setting(int argc, char** argv){
@@ -60,10 +60,11 @@ int setting(int argc, char** argv){
 
 	bsize = 1000;
 	bufsize = bsize;
+	int bufsize_change = 0;
 
 	pktrate = 1000;
 
-	num = 99999;
+	num = 9999999999999;
 
 	strcpy(hostname, "localhost");
 
@@ -108,12 +109,16 @@ int setting(int argc, char** argv){
         		break;
         	case 'u':
         		bufsize = atoi(optarg);
+        		bufsize_change = 1;
         		break;
         	case 'b':
         		bufsize = atoi(optarg);
+        		bufsize_change = 1;
         		break;
         	case 'k':
         		bsize = atoi(optarg);
+        		if (bufsize_change == 0)
+        			bufsize = bsize;
         		break;
             case 'p':
                 port = atoi(optarg);
@@ -150,15 +155,16 @@ char *send_stat_cal(int usec_time, int package_no){
 	return output;
 }
 
-char *recv_stat_cal(int usec_time, int package_no){
-	static int recieved = 0, max = 0;
-	static int previous_time = 0, pretrans_time = 0;
-	static int deltasum = 0;
+char *recv_stat_cal(long usec_time, int package_no){
+	static long long recieved = 0, max = 0;
+	static long previous_time = 0, pretrans_time = 0;
+	static long deltasum = 0;
+	static long long lost = 0;
 	double jitter = 0;
 	if (package_no>max)
 		max = package_no;
 	recieved++;
-	int lost = package_no+1 - recieved;
+	lost = max+1 - recieved;
 	double lostrate = (double)lost/recieved;
 	double rate = (double)bsize*recieved*1000/usec_time;
 	
@@ -173,7 +179,7 @@ char *recv_stat_cal(int usec_time, int package_no){
 	previous_time = usec_time;
 
 	char *output = (char *)malloc(100);
-	sprintf(output, "Pkts [%d] Lost [%d, %.2lf%%] Rate [%.2lfMbps] Jitter [%.2lfus]", recieved, lost, lostrate, rate, jitter);
+	sprintf(output, "Pkts [%lld] Lost [%lld, %.2lf%%] Rate [%.2lfMbps] Jitter [%.2lfus]", recieved, lost, lostrate, rate, jitter);
 	return output;
 }
 
@@ -321,7 +327,7 @@ void tcp_client(){
 	    ES_Timer timer;
 	    timer.Start();
 
-	    for(int i = 0; i<num; i++){
+	    for(long long i = 0; i<num; i++){
 	    	temsum = 0;
 	    	memset(message,'\n',sizeof(message));
 	    	encode_header(message, i);
@@ -351,7 +357,7 @@ void tcp_client(){
 		ES_Timer timer;
 	    timer.Start();
 
-	    for(int i = 0; i<num; i++){
+	    for(long long i = 0; i<num; i++){
 	    	temsum = 0;
 	    	memset(message,'\n',sizeof(message));
 	    	encode_header(message, i);
