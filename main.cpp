@@ -30,6 +30,10 @@ int num;
 
 int proto;
 
+char hostname[100];
+
+
+
 void encode_header(char *buffer, int number){
 	//support maximum sequence number 10000 packages
 	sprintf(buffer, "%d%d%d%d", number/1000, (number%1000)/100, (number%100)/10, number%10);
@@ -61,6 +65,8 @@ int setting(int argc, char** argv){
 
 	num = 99999;
 
+	strcpy(hostname, "localhost");
+
 	const char *optstring = "srp:k:b:u:";
     int c;
     struct option opts[] = {
@@ -73,10 +79,18 @@ int setting(int argc, char** argv){
         {"sbufsize", 1, NULL, 'u'},
         {"pktrate", 1, NULL, 't'},
         {"pktnum", 1, NULL , 'n'},
-        {"proto", 1, NULL, 'o'}
+        {"proto", 1, NULL, 'o'},
+        {"rhost", 1, NULL, 'h'},
+        {"lhost", 1, NULL, 'l'}
     };
     while((c = getopt_long(argc, argv, optstring, opts, NULL)) != -1) {
         switch(c) {
+        	case 'l':
+        		strcpy(hostname, optarg);
+        		break;
+        	case 'h':
+        		strcpy(hostname, optarg);
+        		break;
         	case 'o':
         		if (strcmp(optarg,"tcp")==0)
         		{
@@ -195,7 +209,13 @@ void tcp_server(){
     bzero(&clientInfo,sizeof(clientInfo));
 
     serverInfo.sin_family = PF_INET;
-    serverInfo.sin_addr.s_addr = INADDR_ANY;
+    struct hostent *he;
+    if ( (he = gethostbyname(hostname) ) == NULL ) {
+    	printf("Invalid hostname\n");
+      	exit(1); /* error */
+  	}
+    memcpy(&serverInfo.sin_addr, he->h_addr_list[0], he->h_length);
+    //serverInfo.sin_addr.s_addr = INADDR_ANY;
     serverInfo.sin_port = htons(port);
     bind(sockfd,(struct sockaddr *)&serverInfo,sizeof(serverInfo));
 
@@ -274,7 +294,12 @@ void tcp_client(){
     struct sockaddr_in info, myaddr;	//set address info
     bzero(&info,sizeof(info));
     info.sin_family = domain;
-    info.sin_addr.s_addr = inet_addr(address);
+    struct hostent *he;
+    if ( (he = gethostbyname(hostname) ) == NULL ) {
+      exit(1); /* error */
+  	}
+    memcpy(&info.sin_addr, he->h_addr_list[0], he->h_length);
+    //info.sin_addr.s_addr = inet_addr(address);
     info.sin_port = htons(port);
 
     //myaddr for returning
@@ -342,106 +367,6 @@ void tcp_client(){
 	    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 	    }
 	}
-}
-
-void udp_server(){
-	char *inputBuffer = (char *) malloc(sizeof(char)*bufsize);
-	char *outputBuffer = (char *) malloc(sizeof(char)*bsize);
-	memset(inputBuffer, '\0', bufsize);
-	memset(outputBuffer, '\0', bsize);
-    int sockfd = 0,forClientSockfd = 0;
-    sockfd = socket(AF_INET , SOCK_STREAM , 0);
-
-    if (sockfd == -1){
-        printf("Fail to create a socket.");
-    }
-
-    //socket的連線
-    struct sockaddr_in serverInfo,clientInfo;
-    socklen_t addrlen = sizeof(clientInfo);
-    bzero(&serverInfo,sizeof(serverInfo));
-
-    serverInfo.sin_family = PF_INET;
-    serverInfo.sin_addr.s_addr = INADDR_ANY;
-    serverInfo.sin_port = htons(port);
-    bind(sockfd,(struct sockaddr *)&serverInfo,sizeof(serverInfo));
-    listen(sockfd,5);
-    forClientSockfd = accept(sockfd,(struct sockaddr *)&clientInfo, &addrlen);
-    strcpy(stat, "Packet transmitting..");
-    
-    int recvb = 0;
-    int temsum = 0;
-
-    int count = 0;
-
-    ES_Timer timer;
-    timer.Start();
-    while(1){
-    	temsum = 0;
-    	memset(outputBuffer, '\0', bsize);
-    	while(bsize>temsum){
-        	recvb = recv(forClientSockfd,inputBuffer,bufsize,0);
-    		if (recvb==0)
-    		{
-    			printf("Packages all recieved.\n");
-    			exit(0);
-    		}
-    		//printf("BUF SIZE=%d\n", recvb);
-    		strcpy(outputBuffer+temsum, inputBuffer);
-    		//printf("%s\n", outputBuffer);
-    		temsum += recvb;
-    	}
-    	//printf("This is package %d", decode_header(outputBuffer));
-        sprintf(stat, "%s\n", recv_stat_cal(timer.ElapseduSec(),decode_header(outputBuffer)));
-    }
-}
-
-void udp_client(){
-	//set the package size
-	char *message = (char *) malloc(sizeof(char)*bsize);
-	memset(message, '\0', sizeof(char)*bsize);
-
-
-	int sockfd = socket(domain, type, protocol);
-
-	if (sockfd == -1){
-        printf("Fail to create a socket.");
-    }
-
-    struct sockaddr_in info;	//set address info
-    bzero(&info,sizeof(info));
-    info.sin_family = domain;
-    info.sin_addr.s_addr = inet_addr(address);
-    info.sin_port = htons(port);
-    
-    int err = connect(sockfd,(struct sockaddr *)&info,sizeof(info));
-    if(err==-1){
-        printf("Connection error");
-    }
-
-    int count = 0;
-    int sendb;
-    int temsum = 0;
-
-    ES_Timer timer;
-    timer.Start();
-
-    for(int i = 0; i<num; i++){
-    	temsum = 0;
-    	memset(message,'\n',sizeof(message));
-    	encode_header(message, i);
-
-    	//keep sending before put all data of a package into buf
-    	while(bsize>temsum){
-    		if(pktrate>0)
-	    		msleep(1000/(pktrate/bufsize));
-	    	sendb = send(sockfd, message+temsum, bufsize>bsize-temsum ? bsize-temsum: bufsize, 0);
-	    	temsum += sendb;
-	    }
-    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
-    }
-    msleep(stat_ms);
-    close(sockfd);
 }
 
 int main(int argc, char** argv){
