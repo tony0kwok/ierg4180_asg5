@@ -362,7 +362,6 @@ void tcp_client(){
 		    		msleep(1000/(pktrate/bufsize));
 		    	sendb = sendto(sockfd, message+temsum, bufsize>bsize-temsum ? bsize-temsum: bufsize, 0, (struct sockaddr *)&info,sizeof(info));
 		    	temsum += sendb;
-		    	printf("%d\n", temsum);
 		    }
 	    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 	    }
