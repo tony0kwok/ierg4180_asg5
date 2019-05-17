@@ -31,6 +31,18 @@ struct Netprobe *request_decode(char *buffer){
 	return np;
 }
 
+SendSet *sendset_decode(char *buffer){
+	SendSet *s_set = (SendSet*)malloc(sizeof(SendSet));
+	memcpy(s_set,(SendSet*)buffer,sizeof(SendSet));
+	return s_set;
+}
+
+RecvSet *recvSet_decode(char *buffer){
+	RecvSet *r_set = (RecvSet*)malloc(sizeof(RecvSet));
+	memcpy(r_set,(RecvSet*)buffer,sizeof(RecvSet));
+	return r_set;
+}
+
 int domain;
 int type;
 int protocol;
@@ -151,10 +163,10 @@ int setting(int argc, char** argv){
             	stat_ms = atoi(optarg);
             	break; 
             case 's':
-                mode = 1;
+                mode = SEND;
                 break;
             case 'r':
-                mode = 0;
+                mode = RECV;
                 break;
             case '?':
                 printf("unknown option\n");
@@ -222,14 +234,19 @@ void* threadfunc(void* data){
 
 void client(){
 	//set the package size
-	char *message = (char *) malloc(sizeof(char)*bsize);
-	memset(message, '\0', sizeof(char)*bsize);
+	char *message = (char *) malloc(sizeof(char)*sbufsize);
+	memset(message, '\0', sizeof(char)*sbufsize);
+
+	char *recvbuffer = (char *) malloc(sizeof(char)*rbufsize);
+	memset(recvbuffer, '\0', sizeof(char)*rbufsize);
 
 
 	int sockfd = socket(domain, type, protocol);
+	int tcp_sock = socket(domain, SOCK_STREAM, protocol);
 
-	if (sockfd == -1){
+	if (sockfd == -1||tcp_sock == -1){
         printf("Fail to create a socket.");
+        return;
     }
 
     struct sockaddr_in info, myaddr;	//set address info
@@ -249,35 +266,79 @@ void client(){
     myaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     myaddr.sin_port = htons(0);
     printf("loading\n");
+
+
+
+
+    //Request====================
+	//send request to tell server TCP or UDP, SEND or RECV
+    int err = connect(tcp_sock,(struct sockaddr *)&info,sizeof(info));
+    if(err==-1){
+        printf("Connection error");
+        exit(1);
+    }
+
+    int count = 0;
+    int sendb;
+    int temsum = 0;
+
+
+    memset(message, '\n', sizeof(message));
+
+    //set netprobe setting request
+    struct Netprobe np = {mode, type};
+    char *h = (char *)malloc(sizeof(hostname));
+    strcpy(h, hostname);
+    SendSet s_set = {h, port, proto, bsize, pktrate, num, sbufsize};
+    RecvSet r_set = {port, proto, bsize, rbufsize, 0};
+
+    char *request_buf;
+    request_buf = request_encode(np);
+    struct Netprobe *new_np = request_decode(request_buf);
+    printf("mode = %d, proto = %d\n", new_np->mode, new_np->proto);
+    printf("send to host: %s\n", s_set.hostname);
+
+    memset(message,'\n',sizeof(message));
+    memcpy(message, request_buf, sizeof(struct Netprobe));
+
+    int request_size;
+
+    if (mode==SEND)
+    {
+    	//send recv information to server
+    	memcpy(message+sizeof(struct Netprobe),(const char*) &r_set,sizeof(RecvSet));
+    	request_size = sizeof(struct Netprobe)+sizeof(RecvSet);
+    }
+    if (mode==RECV)
+    {
+    	//send send information to server
+    	memcpy(message+sizeof(struct Netprobe),(const char*) &s_set,sizeof(SendSet));
+    	request_size = sizeof(struct Netprobe)+sizeof(SendSet);
+    }
+
+    int sendb_request;
+
+	//keep sending before put all data of a package into buf
+	if (sendb_request = send(tcp_sock, message, request_size, 0)<=0)
+	{
+		perror("send request error: ");
+	}
+    //finish request sending===========================
+
+
+    msleep(1000);
+    //check if the server receive the request
+    /*while(1){
+    	if(int recvb = recv(tcp_sock, recvbuffer, 1000, 0)>0)
+    		if(type==SOCK_DGRAM)
+    			close(tcp_sock);
+    		break;
+    }*/
+
+
     if(type == SOCK_STREAM){
-	    int err = connect(sockfd,(struct sockaddr *)&info,sizeof(info));
-	    if(err==-1){
-	        printf("Connection error");
-	        exit(1);
-	    }
-
-	    int count = 0;
-	    int sendb;
-	    int temsum = 0;
-
-	    ES_Timer timer;
+	   	ES_Timer timer;
 	    timer.Start();
-
-	    //send request to tell server TCP or UDP, SEND or RECV
-	    memset(message, '\n', sizeof(message));
-
-	    //set netprobe setting request
-	    struct Netprobe np = {SEND, SOCK_STREAM};
-	    char *h = (char *)malloc(sizeof(hostname));
-	    strcpy(h, hostname);
-	    SendSet s_set = {h, port, proto, bsize, pktrate, num, sbufsize};
-	    RecvSet r_set = {port, proto, bsize, rbufsize, 0};
-
-	    char *request_buf;
-	    request_buf = request_encode(np);
-	    struct Netprobe *new_np = request_decode(request_buf);
-	    printf("mode = %d, proto = %d\n", new_np->mode, new_np->proto);
-	    printf("send to host: %s\n", s_set.hostname);
 
 	    for(long long i = 0; i<num; i++){
 	    	temsum = 0;
@@ -288,17 +349,19 @@ void client(){
 	    	while(bsize>temsum){
 	    		if(pktrate>0)
 		    		msleep(1000/(pktrate/sbufsize));
-		    	sendb = send(sockfd, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0);
+		    	sendb = send(tcp_sock, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0);
 		    	temsum += sendb;
 		    }
+		    printf("socket %lld is sent\n", i);
 	    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 	    }
 	    msleep(stat_ms);
-	    close(sockfd);	
+	    close(tcp_sock);	
 	}
 
 	if (type==SOCK_DGRAM)
 	{
+		close(tcp_sock);
 		if (bind(sockfd, (struct sockaddr *)&myaddr,
                             sizeof(myaddr)) <0) {
             perror("bind failed!");
