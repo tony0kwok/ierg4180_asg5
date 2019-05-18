@@ -301,32 +301,35 @@ int main(int argc, char** argv){
 
 	    //add all connected tcp into fd set
 	    for(int i=0;i<tcpmax;i++){
-		    FD_SET(tcpClientSockfd[tcpmax],&sock_fds);
-		    if (tcpClientSockfd[tcpmax]>max)
-		    	max = tcpClientSockfd[tcpmax];
+	    	if (tcpClientSockfd[i]==0)	//means Sockfd expired
+	    		continue;
+		    FD_SET(tcpClientSockfd[i],&sock_fds);
+		    if (tcpClientSockfd[i]>max)
+		    	max = tcpClientSockfd[i];
 		}
 
 	    printf("%d\n", stat_ms);
 	    printf("FD SET %d\n", n);
 	    n++;
+
 		if(result = select(max+1, &sock_fds, NULL, NULL, NULL)<0){
 			perror("select error: ");
 			exit(1);
 		}
 
-		if (result==0)
-		{
-			printf("select return 0\n");
-		}
-
 		for (int i = 0; i < tcpmax; i++)
 		{
+			int result;
 			printf("tcpClientSockfd[i] = %d\n", tcpClientSockfd[i]);
 			//recv(tcpClientSockfd[i],recvBuffer,sizeof(recvBuffer),0);
 			//printf("%s\n", recvBuffer);
 			if(FD_ISSET(tcpClientSockfd[i], &sock_fds)){
-				recv(tcpClientSockfd[i],recvBuffer,sizeof(recvBuffer),0);
-				printf("recving tcp message from %d\n", i);
+				if(result = recv(tcpClientSockfd[i],recvBuffer,rbufsize,0)>0);
+					printf("recving tcp message from %d\n", i);
+				if (result<=0)
+				{
+					tcpClientSockfd[i]=0;
+				}
 			}
 		}
 
@@ -350,7 +353,7 @@ int main(int argc, char** argv){
 		{
 			tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)&clientInfo, &addrlen);
 			printf("accepted\n");
-			if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>=0)
+			if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
 			{
 				printf("tcpClientSockfd[tcpmax] = %d\n", tcpClientSockfd[tcpmax]);
 				struct Netprobe *request = request_decode(recvBuffer);
@@ -370,7 +373,12 @@ int main(int argc, char** argv){
 					}
 
 				if(request->proto==SOCK_STREAM){
+					/*while(1){
+						if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
+							printf("%s\n", recvBuffer);
+					}*/
 					tcpmax++;
+
 				}
 				if(request->proto==SOCK_DGRAM){
 				//close(tcpClientSockfd[tcpmax]);
