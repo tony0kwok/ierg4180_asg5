@@ -31,16 +31,48 @@ struct Netprobe *request_decode(char *buffer){
 	return np;
 }
 
+SendSet *sendset_encode(char *buffer, SendSet s_set){
+	memcpy(buffer,(const char*) &s_set,sizeof(s_set));
+	return s_set;
+}
+
+RecvSet *recvset_encode(char *buffer, RecvSet r_set){
+	memcpy(buffer,(const char*) &r_set,sizeof(r_set));
+	return r_set;
+}
+
 SendSet *sendset_decode(char *buffer){
 	SendSet *s_set = (SendSet*)malloc(sizeof(SendSet));
 	memcpy(s_set,(SendSet*)buffer,sizeof(SendSet));
 	return s_set;
 }
 
-RecvSet *recvSet_decode(char *buffer){
+RecvSet *recvset_decode(char *buffer){
 	RecvSet *r_set = (RecvSet*)malloc(sizeof(RecvSet));
 	memcpy(r_set,(RecvSet*)buffer,sizeof(RecvSet));
 	return r_set;
+}
+
+void showNetprobe(struct Netprobe *np){
+	printf("Netprobe->mode: %d\n", np->mode);
+	printf("Netprobe->proto: %d\n", np->proto);
+}
+
+void showSendSet(SendSet *s_set){
+	printf("SendSet->hostname: %s\n", s_set->hostname);
+	printf("SendSet->port: %d\n", s_set->port);
+	printf("SendSet->bsize: %ld\n", s_set->bsize);
+	printf("SendSet->pktrate: %ld\n", s_set->pktrate);
+	printf("SendSet->num: %ld\n", s_set->num);
+	printf("SendSet->sbufsize: %ld\n", s_set->sbufsize);
+}
+
+void showRecvSet(RecvSet *r_set){
+	printf("RecvSet->port: %d\n", r_set->port);
+	printf("RecvSet->proto: %d\n", r_set->proto);
+	printf("RecvSet->bsize: %ld\n", r_set->bsize);
+	printf("RecvSet->rbufsize: %ld\n", r_set->rbufsize);
+	printf("RecvSet->received: %ld\n", r_set->received);	//wrong name
 }
 
 int domain;
@@ -295,7 +327,8 @@ void client(){
     char *request_buf;
     request_buf = request_encode(np);
     struct Netprobe *new_np = request_decode(request_buf);
-    printf("mode = %d, proto = %d\n", new_np->mode, new_np->proto);
+    //if mode is RECV, set host to SEND mode
+    printf("hostmode = %d, proto = %d\n", new_np->mode?0:1, new_np->proto);
     printf("send to host: %s\n", s_set.hostname);
 
     memset(message,'\n',sizeof(message));
@@ -316,6 +349,11 @@ void client(){
     	request_size = sizeof(struct Netprobe)+sizeof(SendSet);
     }
 
+    struct Netprobe *nnp = request_decode(message);
+    showNetprobe(nnp);
+    RecvSet *rr_set = recvset_decode(message+sizeof(struct Netprobe));
+    showRecvSet(rr_set);
+
     int sendb_request;
 
 	//keep sending before put all data of a package into buf
@@ -323,6 +361,8 @@ void client(){
 	{
 		perror("send request error: ");
 	}
+
+	//SendSetsendset_decode(message+sizeof(struct Netprobe));
     //finish request sending===========================
 
 
