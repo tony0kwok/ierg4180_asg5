@@ -1,27 +1,32 @@
 struct Netprobe{
 	int mode;
 	int proto;
-	long bsize;
 };
 
-struct send_set{
-	int mode;
-	char hostname[100];
-	int port;
-	int proto;
+typedef struct send_set{
 	long bsize;
 	long pktrate;
 	long num;
 	long sbufsize;
+	long sent;
 } SendSet;
 
-struct recv_set{
-	int port;
-	int proto;
+typedef struct recv_set{
 	long bsize;
 	long rbufsize;
+	long received;
 } RecvSet;
 
-char *request_encode(struct Netprobe np);
+typedef struct netsock{
+	int sockfd;
+	struct sockaddr_in clientInfo;
+	socklen_t addrlen;
+	struct Netprobe *np;
+	SendSet *s_set;
+	RecvSet *r_set;
+	ES_Timer timer;
+} Netsock;
 
-struct Netprobe *request_decode(char *buffer);
+//char *request_encode(struct Netprobe np);
+
+//struct Netprobe *request_decode(char *buffer);
