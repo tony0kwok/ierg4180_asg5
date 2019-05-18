@@ -31,6 +31,16 @@ struct Netprobe *request_decode(char *buffer){
 	return np;
 }
 
+SendSet sendset_encode(char *buffer, SendSet s_set){
+	memcpy(buffer,(const char*) &s_set,sizeof(s_set));
+	return s_set;
+}
+
+RecvSet recvset_encode(char *buffer, RecvSet r_set){
+	memcpy(buffer,(const char*) &r_set,sizeof(r_set));
+	return r_set;
+}
+
 SendSet *sendset_decode(char *buffer){
 	SendSet *s_set = (SendSet*)malloc(sizeof(SendSet));
 	memcpy(s_set,(SendSet*)buffer,sizeof(SendSet));
@@ -49,8 +59,6 @@ void showNetprobe(struct Netprobe *np){
 }
 
 void showSendSet(SendSet *s_set){
-	printf("SendSet->hostname: %s\n", s_set->hostname);
-	printf("SendSet->port: %d\n", s_set->port);
 	printf("SendSet->bsize: %ld\n", s_set->bsize);
 	printf("SendSet->pktrate: %ld\n", s_set->pktrate);
 	printf("SendSet->num: %ld\n", s_set->num);
@@ -58,8 +66,6 @@ void showSendSet(SendSet *s_set){
 }
 
 void showRecvSet(RecvSet *r_set){
-	printf("RecvSet->port: %d\n", r_set->port);
-	printf("RecvSet->proto: %d\n", r_set->proto);
 	printf("RecvSet->bsize: %ld\n", r_set->bsize);
 	printf("RecvSet->rbufsize: %ld\n", r_set->rbufsize);
 	printf("RecvSet->received: %ld\n", r_set->received);	//wrong name
@@ -80,7 +86,7 @@ void encode_header(char *buffer, int number){
 	sprintf(buffer, "%d%d%d%d%d%d%d%d", number/10000000, (number%10000000)/1000000, (number%1000000)/100000, (number%100000)/10000, (number%10000)/1000, (number%1000)/100, (number%100)/10, number%10);
 }	
 
-long long decode_header(char *buffer){
+long decode_header(char *buffer){
 	return atoll(buffer);
 }
 
@@ -116,16 +122,16 @@ int setting(int argc, char** argv){
         		strcpy(hostname, optarg);
         		break;
         	case 'f':
-        		rbufsize = atoi(optarg);
+        		rbufsize = atol(optarg);
         		break;
         	case 'u':
-        		sbufsize = atoi(optarg);
+        		sbufsize = atol(optarg);
         		break;
             case 'p':
-                port = atoi(optarg);
+                port = atol(optarg);
                 break;
             case 'm':
-            	stat_ms = atoi(optarg);
+            	stat_ms = atol(optarg);
                 break;
             case '?':
                 printf("unknown option\n");
@@ -151,10 +157,10 @@ void msleep(int ms){
 }
 
 char *recv_stat_cal(long usec_time, int package_no){
-	static long long recieved = 0, max = 0;
+	static long recieved = 0, max = 0;
 	static long previous_time = 0, pretrans_time = 0;
 	static long deltasum = 0;
-	static long long lost = 0;
+	static long lost = 0;
 	double jitter = 0;
 	if (package_no>max)
 		max = package_no;
@@ -203,7 +209,7 @@ void* threadfunc(void* data){
 
     int num = SendSet->num;
 
-    for(long long i = 0; i<num; i++){
+    for(long i = 0; i<num; i++){
     	temsum = 0;
     	memset(message,'\n',sizeof(message));
     	encode_header(message, i);
@@ -353,24 +359,23 @@ int main(int argc, char** argv){
 				if (request->mode==RECV)
 					{
 						printf("mode: recv\n");
-						RecvSet *r_set = recvset_decode(recvBuffer+sizeof(struct Netprobe)+4);
+						RecvSet *r_set = recvset_decode(recvBuffer+sizeof(struct Netprobe));
 						showRecvSet(r_set);
 					}
 				if (request->mode==SEND)
 					{
 						printf("mode: send\n");
-						SendSet *s_set = sendset_decode(recvBuffer+sizeof(struct Netprobe)+4);
-						showSendSet(s_set);
+						SendSet *s_set = sendset_decode(recvBuffer+sizeof(struct Netprobe));
+					    showSendSet(s_set);
 					}
 
 				if(request->proto==SOCK_STREAM){
 					tcpmax++;
 				}
-				else
-					if(request->proto==SOCK_DGRAM){
-					//close(tcpClientSockfd[tcpmax]);
-					udpClientInfo[udpmax] = clientInfo;
-					udpmax++;
+				if(request->proto==SOCK_DGRAM){
+				//close(tcpClientSockfd[tcpmax]);
+				udpClientInfo[udpmax] = clientInfo;
+				udpmax++;
 				}
 				printf("tcp num = %d, udp num = %d\n",tcpmax,udpmax);
 			}

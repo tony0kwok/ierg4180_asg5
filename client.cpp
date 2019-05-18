@@ -31,12 +31,12 @@ struct Netprobe *request_decode(char *buffer){
 	return np;
 }
 
-SendSet *sendset_encode(char *buffer, SendSet s_set){
+SendSet sendset_encode(char *buffer, SendSet s_set){
 	memcpy(buffer,(const char*) &s_set,sizeof(s_set));
 	return s_set;
 }
 
-RecvSet *recvset_encode(char *buffer, RecvSet r_set){
+RecvSet recvset_encode(char *buffer, RecvSet r_set){
 	memcpy(buffer,(const char*) &r_set,sizeof(r_set));
 	return r_set;
 }
@@ -59,8 +59,6 @@ void showNetprobe(struct Netprobe *np){
 }
 
 void showSendSet(SendSet *s_set){
-	printf("SendSet->hostname: %s\n", s_set->hostname);
-	printf("SendSet->port: %d\n", s_set->port);
 	printf("SendSet->bsize: %ld\n", s_set->bsize);
 	printf("SendSet->pktrate: %ld\n", s_set->pktrate);
 	printf("SendSet->num: %ld\n", s_set->num);
@@ -68,8 +66,6 @@ void showSendSet(SendSet *s_set){
 }
 
 void showRecvSet(RecvSet *r_set){
-	printf("RecvSet->port: %d\n", r_set->port);
-	printf("RecvSet->proto: %d\n", r_set->proto);
 	printf("RecvSet->bsize: %ld\n", r_set->bsize);
 	printf("RecvSet->rbufsize: %ld\n", r_set->rbufsize);
 	printf("RecvSet->received: %ld\n", r_set->received);	//wrong name
@@ -90,7 +86,7 @@ long bufsize;
 
 long pktrate;
 
-long long num;
+long num;
 
 int proto;
 
@@ -105,8 +101,8 @@ void encode_header(char *buffer, int number){
 	sprintf(buffer, "%d%d%d%d%d%d%d%d", number/10000000, (number%10000000)/1000000, (number%1000000)/100000, (number%100000)/10000, (number%10000)/1000, (number%1000)/100, (number%100)/10, number%10);
 }	
 
-long long decode_header(char *buffer){
-	return atoll(buffer);
+long decode_header(char *buffer){
+	return atol(buffer);
 }
 
 int setting(int argc, char** argv){
@@ -132,7 +128,7 @@ int setting(int argc, char** argv){
 
 	pktrate = 1000;
 
-	num = 9999999999999;
+	num = 999999999;
 
 	strcpy(hostname, "localhost");
 
@@ -170,21 +166,21 @@ int setting(int argc, char** argv){
         		}
         		break;
         	case 'n':
-        		num = atoi(optarg);
+        		num = atol(optarg);
         		break;
         	case 't':
-        		pktrate = atoi(optarg);
+        		pktrate = atol(optarg);
         		break;
         	case 'u':
-        		sbufsize = atoi(optarg);
+        		sbufsize = atol(optarg);
         		bufsize_change = 1;
         		break;
         	case 'b':
-        		rbufsize = atoi(optarg);
+        		rbufsize = atol(optarg);
         		bufsize_change = 1;
         		break;
         	case 'k':
-        		bsize = atoi(optarg);
+        		bsize = atol(optarg);
         		if (bufsize_change == 0)
         			bufsize = bsize;
         		break;
@@ -224,10 +220,10 @@ char *send_stat_cal(int usec_time, int package_no){
 }
 
 char *recv_stat_cal(long usec_time, int package_no){
-	static long long recieved = 0, max = 0;
+	static long recieved = 0, max = 0;
 	static long previous_time = 0, pretrans_time = 0;
 	static long deltasum = 0;
-	static long long lost = 0;
+	static long lost = 0;
 	double jitter = 0;
 	if (package_no>max)
 		max = package_no;
@@ -247,7 +243,7 @@ char *recv_stat_cal(long usec_time, int package_no){
 	previous_time = usec_time;
 
 	char *output = (char *)malloc(100);
-	sprintf(output, "Pkts [%lld] Lost [%lld, %.2lf%%] Rate [%.2lfMbps] Jitter [%.2lfus]", recieved, lost, lostrate, rate, jitter);
+	sprintf(output, "Pkts [%ld] Lost [%ld, %.2lf%%] Rate [%.2lfMbps] Jitter [%.2lfus]", recieved, lost, lostrate, rate, jitter);
 	return output;
 }
 
@@ -318,18 +314,21 @@ void client(){
     memset(message, '\n', sizeof(message));
 
     //set netprobe setting request
-    struct Netprobe np = {mode, type};
-    char *h = (char *)malloc(sizeof(hostname));
-    strcpy(h, hostname);
-    SendSet s_set = {h, port, proto, bsize, pktrate, num, sbufsize};
-    RecvSet r_set = {port, proto, bsize, rbufsize, 0};
+    struct Netprobe np = {mode?0:1, type};
+
+    //set the send set
+    SendSet s_set = {bsize, pktrate, num, sbufsize};
+
+    //set the recv set
+    RecvSet r_set = {bsize, rbufsize, 0};
+
 
     char *request_buf;
     request_buf = request_encode(np);
     struct Netprobe *new_np = request_decode(request_buf);
     //if mode is RECV, set host to SEND mode
     printf("hostmode = %d, proto = %d\n", new_np->mode?0:1, new_np->proto);
-    printf("send to host: %s\n", s_set.hostname);
+    printf("send to host: %s\n", hostname);
 
     memset(message,'\n',sizeof(message));
     memcpy(message, request_buf, sizeof(struct Netprobe));
@@ -339,22 +338,35 @@ void client(){
     if (mode==SEND)
     {
     	//send recv information to server
-    	memcpy(message+sizeof(struct Netprobe),(const char*) &r_set,sizeof(RecvSet));
+    	//memcpy(message+sizeof(struct Netprobe),(const char*) &r_set,sizeof(RecvSet));
+    	recvset_encode(message+sizeof(struct Netprobe), r_set);
     	request_size = sizeof(struct Netprobe)+sizeof(RecvSet);
     }
     if (mode==RECV)
     {
     	//send send information to server
-    	memcpy(message+sizeof(struct Netprobe),(const char*) &s_set,sizeof(SendSet));
+    	//memcpy(message+sizeof(struct Netprobe),(const char*) &s_set,sizeof(SendSet));
+    	sendset_encode(message+sizeof(struct Netprobe), s_set);
     	request_size = sizeof(struct Netprobe)+sizeof(SendSet);
     }
 
     struct Netprobe *nnp = request_decode(message);
     showNetprobe(nnp);
-    RecvSet *rr_set = recvset_decode(message+sizeof(struct Netprobe));
-    showRecvSet(rr_set);
+    if (mode==SEND){
+	    RecvSet *rr_set = recvset_decode(message+sizeof(struct Netprobe));
+	    showRecvSet(rr_set);
+	}
+    if (mode==RECV){
+	    SendSet *ss_set = sendset_decode(message+sizeof(struct Netprobe));
+	    showSendSet(ss_set);
+	}
 
     int sendb_request;
+
+    for (int i = 0; i < request_size; i++)
+    {
+    	printf("%u\n", message[i]);
+    }
 
 	//keep sending before put all data of a package into buf
 	if (sendb_request = send(tcp_sock, message, request_size, 0)<=0)
@@ -380,7 +392,7 @@ void client(){
 	   	ES_Timer timer;
 	    timer.Start();
 
-	    for(long long i = 0; i<num; i++){
+	    for(long i = 0; i<num; i++){
 	    	temsum = 0;
 	    	memset(message,'\n',sizeof(message));
 	    	encode_header(message, i);
@@ -388,11 +400,11 @@ void client(){
 	    	//keep sending before put all data of a package into buf
 	    	while(bsize>temsum){
 	    		if(pktrate>0)
-		    		msleep(1000/(pktrate/sbufsize));
+		    		msleep(1000/((float)pktrate/sbufsize));
 		    	sendb = send(tcp_sock, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0);
 		    	temsum += sendb;
 		    }
-		    printf("socket %lld is sent\n", i);
+		    printf("socket %ld is sent\n", i);
 	    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 	    }
 	    msleep(stat_ms);
@@ -412,7 +424,7 @@ void client(){
 		ES_Timer timer;
 	    timer.Start();
 
-	    for(long long i = 0; i<num; i++){
+	    for(long i = 0; i<num; i++){
 	    	temsum = 0;
 	    	memset(message,'\n',sizeof(message));
 	    	encode_header(message, i);
@@ -420,7 +432,7 @@ void client(){
 	    	//keep sending before put all data of a package into buf
 	    	while(bsize>temsum){
 	    		if(pktrate>0)
-		    		msleep(1000/(pktrate/sbufsize));
+		    		msleep(1000/((float)pktrate/sbufsize));
 		    	sendb = sendto(sockfd, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0, (struct sockaddr *)&info,sizeof(info));
 		    	temsum += sendb;
 		    }
