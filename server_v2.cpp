@@ -315,9 +315,9 @@ int main(int argc, char** argv){
 	    FD_SET(listen_sockfd,&read_fds);
 	    if (listen_sockfd>max)
 		   max = listen_sockfd;
-	    FD_SET(udpsockfd,&read_fds);
+	    /*FD_SET(udpsockfd,&read_fds);
 	    if (udpsockfd>max)
-	    	max = udpsockfd;
+	    	max = udpsockfd;*/
 
 	    //add all sockfd in ns array
 	    for (int i = 0; i < netsockmax; i++)
@@ -384,12 +384,11 @@ int main(int argc, char** argv){
 							printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
 							printf("sent %ld package\n", ns[i].s_set->sent);
 							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);
-							if (ns[i].s_set->sent < (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000))
-							{
-								//need to improve
+							if (ns[i].s_set->pktrate==0)
+					    	{
+						    	//need to improve, because it send one whole package in a loop
 								long temsum = 0;
 								long sendb;
-								memset(sendBuffer,'\n',sizeof(sendBuffer));
 						    	encode_header(sendBuffer, ns[i].s_set->sent);
 
 						    	//keep sending before put all data of a package into buf
@@ -404,12 +403,58 @@ int main(int argc, char** argv){
 
 							    ns[i].s_set->sent += 1;
 							    printf("sending message: %s\n", sendBuffer);
+							    //==============================
+					    	}
+						    else
+							if (ns[i].s_set->sent < (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000))
+							{
+								//need to improve, because it send one whole package in a loop
+								long temsum = 0;
+								long sendb;
+						    	encode_header(sendBuffer, ns[i].s_set->sent);
+
+						    	//keep sending before put all data of a package into buf
+						    	while(ns[i].s_set->bsize>temsum){
+							    	sendb = send(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize - temsum: ns[i].s_set->sbufsize, 0);
+							    	if (sendb<0)
+							    	{
+							    		perror("error: ");
+							    	}
+							    	temsum += sendb;
+							    }
+
+							    ns[i].s_set->sent += 1;
+							    printf("sending message: %s\n", sendBuffer);
+							    //==============================
 							}
 						}
 						else
 						if (ns[i].np->proto==SOCK_DGRAM)
 						{
-							/* code */
+							printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
+							printf("sent %ld package\n", ns[i].s_set->sent);
+							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);
+							if (ns[i].s_set->sent < (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000))
+							{
+								//need to improve
+						    	long temsum = 0;
+						    	long sendb;
+						    	encode_header(sendBuffer, ns[i].s_set->sent);
+
+						    	//keep sending before put all data of a package into buf
+						    	while(ns[i].s_set->bsize>temsum){
+							    	sendb = sendto(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize-temsum: ns[i].s_set->sbufsize, 0, (struct sockaddr *)&(ns[i].clientInfo),sizeof(ns[i].clientInfo));
+							    	if (sendb<0)
+							    	{
+							    		perror("error: ");
+							    	}
+							    	temsum += sendb;
+							    }
+
+							    ns[i].s_set->sent += 1;
+							    printf("sending message: %s\n", sendBuffer);
+							    //===============
+							}
 						}
 					}
 					else
@@ -420,12 +465,12 @@ int main(int argc, char** argv){
 
 		//receive udp request
 
-		if (FD_ISSET(udpsockfd, &read_fds))
+		/*if (FD_ISSET(udpsockfd, &read_fds))
 		{
 			recvfrom(udpsockfd, recvBuffer, sizeof(recvBuffer), 0, (struct sockaddr*)&clientInfo, &addrlen);
 			char *ip = inet_ntoa(clientInfo.sin_addr);
 			printf("recving udp message from %s\n", ip);
-		}
+		}*/
 
 		/*for (int i = 0; i < udpmax; i++)
 		{
@@ -470,7 +515,7 @@ int main(int argc, char** argv){
 				if(ns[netsockmax].np->proto==SOCK_DGRAM){
 					//close(tcpClientSockfd[tcpmax]);
 
-					//ns[netsockmax].sockfd = udpsockfd;
+					ns[netsockmax].sockfd = udpsockfd;
 					udpClientInfo[udpmax] = clientInfo;
 					udpmax++;
 				}

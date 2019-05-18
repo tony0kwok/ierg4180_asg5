@@ -279,6 +279,7 @@ void client(){
     }
 
     struct sockaddr_in info, myaddr;	//set address info
+    socklen_t addrlen = sizeof(info);
     bzero(&info,sizeof(info));
     info.sin_family = domain;
     struct hostent *he;
@@ -449,6 +450,20 @@ void client(){
 		{
 			while(1)
 				if(recv(tcp_sock,recvBuffer,rbufsize,0)<0)
+					perror("error: ");
+		}
+		else
+		if (type==SOCK_DGRAM)
+		{
+			close(tcp_sock);
+			if (bind(sockfd, (struct sockaddr *)&myaddr,
+	                            sizeof(myaddr)) <0) {
+	            perror("bind failed!");
+	            exit(1);
+	    	}
+
+			while(1)
+				if(recvfrom(sockfd, recvBuffer, rbufsize, 0, (struct sockaddr*)&info, &addrlen) < 0)
 					perror("error: ");
 		}
 	}
