@@ -72,6 +72,13 @@ void showRecvSet(RecvSet *r_set){
 	printf("RecvSet->received: %ld\n", r_set->received);	//wrong name
 }
 
+void closeNetsock(Netsock *ns){
+	ns->sockfd = 0;
+	free(ns->s_set);
+	free(ns->r_set);
+	free(ns->np);
+}
+
 int protocol;
 int domain;
 char address[40];
@@ -295,7 +302,7 @@ int main(int argc, char** argv){
 
    	//select set up
    	int max = 0;
-   	fd_set sock_fds;
+   	fd_set read_fds, write_fds;
    	int n = 0;
 
     while(1){
@@ -303,11 +310,12 @@ int main(int argc, char** argv){
 	    struct timeval timeout; 
 	    int result;
 
-	    FD_ZERO(&sock_fds);
-	    FD_SET(listen_sockfd,&sock_fds);
+	    FD_ZERO(&read_fds);
+	    FD_ZERO(&write_fds);
+	    FD_SET(listen_sockfd,&read_fds);
 	    if (listen_sockfd>max)
 		   max = listen_sockfd;
-	    FD_SET(udpsockfd,&sock_fds);
+	    FD_SET(udpsockfd,&read_fds);
 	    if (udpsockfd>max)
 	    	max = udpsockfd;
 
@@ -318,7 +326,12 @@ int main(int argc, char** argv){
 	    	{
 	    		continue;
 	    	}
-	    	FD_SET(ns[i].sockfd, &sock_fds);
+	    	if (ns[i].np->mode==SEND)
+	    		FD_SET(ns[i].sockfd, &write_fds);
+	    	else
+	    	if (ns[i].np->mode==RECV)
+	    		FD_SET(ns[i].sockfd, &read_fds);
+	    	
 	    	if (ns[i].sockfd>max)
 	    	{
 	    		max=ns[i].sockfd;
@@ -329,7 +342,7 @@ int main(int argc, char** argv){
 	    /*for(int i=0;i<tcpmax;i++){
 	    	if (tcpClientSockfd[i]==0)	//means Sockfd expired
 	    		continue;
-		    FD_SET(tcpClientSockfd[i],&sock_fds);
+		    FD_SET(tcpClientSockfd[i],&read_fds);
 		    if (tcpClientSockfd[i]>max)
 		    	max = tcpClientSockfd[i];
 		}*/
@@ -337,7 +350,7 @@ int main(int argc, char** argv){
 	    printf("FD SET %d\n", n);
 	    n++;
 
-		if(result = select(max+1, &sock_fds, NULL, NULL, NULL)<0){
+		if(result = select(max+1, &read_fds, &write_fds, NULL, NULL)<0){
 			perror("select error: ");
 			exit(1);
 		}
@@ -349,34 +362,65 @@ int main(int argc, char** argv){
 			printf("ns[%d].timer = %ld\n", i, ns[i].timer.Elapsed());
 			//do receiving
 			if(ns[i].np->mode==RECV){
-				if(FD_ISSET(ns[i].sockfd, &sock_fds)){
+				if(FD_ISSET(ns[i].sockfd, &read_fds)){
 					//apply to both tcp and udp
 					if(result = recv(ns[i].sockfd,recvBuffer,rbufsize,0)>0);
 						printf("recving tcp message from %s\n, fd %d\n", inet_ntoa(ns[i].clientInfo.sin_addr), ns[i].sockfd);
 					if (result<=0)
 					{
-						ns[i].sockfd=0;
+						closeNetsock(ns+i);
 					}
 				}
 			}
 			else
 			if (ns[i].np->mode==SEND)
 			{
-				if (ns[i].np->proto==SOCK_STREAM)
+				if (FD_ISSET(ns[i].sockfd, &write_fds))
 				{
-					/* code */
-				}
-				else
-				if (ns[i].np->proto==SOCK_DGRAM)
-				{
-					/* code */
+					if(ns[i].s_set->sent<ns[i].s_set->num){
+						if (ns[i].np->proto==SOCK_STREAM)
+						{
+							//if number of socket sent is less than it should be
+							printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
+							printf("sent %ld package\n", ns[i].s_set->sent);
+							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);
+							if (ns[i].s_set->sent < (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000))
+							{
+								//need to improve
+								long temsum = 0;
+								long sendb;
+								memset(sendBuffer,'\n',sizeof(sendBuffer));
+						    	encode_header(sendBuffer, ns[i].s_set->sent);
+
+						    	//keep sending before put all data of a package into buf
+						    	while(ns[i].s_set->bsize>temsum){
+							    	sendb = send(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize - temsum: ns[i].s_set->sbufsize, 0);
+							    	if (sendb<0)
+							    	{
+							    		perror("error: ");
+							    	}
+							    	temsum += sendb;
+							    }
+
+							    ns[i].s_set->sent += 1;
+							    printf("sending message: %s\n", sendBuffer);
+							}
+						}
+						else
+						if (ns[i].np->proto==SOCK_DGRAM)
+						{
+							/* code */
+						}
+					}
+					else
+						closeNetsock(ns+i);
 				}
 			}
 		}
 
 		//receive udp request
 
-		if (FD_ISSET(udpsockfd, &sock_fds))
+		if (FD_ISSET(udpsockfd, &read_fds))
 		{
 			recvfrom(udpsockfd, recvBuffer, sizeof(recvBuffer), 0, (struct sockaddr*)&clientInfo, &addrlen);
 			char *ip = inet_ntoa(clientInfo.sin_addr);
@@ -385,12 +429,12 @@ int main(int argc, char** argv){
 
 		/*for (int i = 0; i < udpmax; i++)
 		{
-			if(FD_ISSET(tcpClientSockfd[i], &sock_fds)){
+			if(FD_ISSET(tcpClientSockfd[i], &read_fds)){
 				recv(tcpClientSockfd[],recvBuffer,10000,0);
 			}	
 		}*/
 
-		if (FD_ISSET(listen_sockfd, &sock_fds))
+		if (FD_ISSET(listen_sockfd, &read_fds))
 		{
 			tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)&(ns[netsockmax].clientInfo), &addrlen);
 			printf("accepted\n");
@@ -425,6 +469,8 @@ int main(int argc, char** argv){
 				}
 				if(ns[netsockmax].np->proto==SOCK_DGRAM){
 					//close(tcpClientSockfd[tcpmax]);
+
+					//ns[netsockmax].sockfd = udpsockfd;
 					udpClientInfo[udpmax] = clientInfo;
 					udpmax++;
 				}

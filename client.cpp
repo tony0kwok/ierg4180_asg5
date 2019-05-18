@@ -266,8 +266,8 @@ void client(){
 	char *message = (char *) malloc(sizeof(char)*sbufsize);
 	memset(message, '\0', sizeof(char)*sbufsize);
 
-	char *recvbuffer = (char *) malloc(sizeof(char)*rbufsize);
-	memset(recvbuffer, '\0', sizeof(char)*rbufsize);
+	char *recvBuffer = (char *) malloc(sizeof(char)*rbufsize);
+	memset(recvBuffer, '\0', sizeof(char)*rbufsize);
 
 
 	int sockfd = socket(domain, type, protocol);
@@ -388,57 +388,69 @@ void client(){
     		break;
     }*/
 
+    if (mode==SEND)
+    {
+	    if(type == SOCK_STREAM){
+		   	ES_Timer timer;
+		    timer.Start();
 
-    if(type == SOCK_STREAM){
-	   	ES_Timer timer;
-	    timer.Start();
+		    for(long i = 0; i<num; i++){
+		    	temsum = 0;
+		    	memset(message,'\n',sizeof(message));
+		    	encode_header(message, i);
 
-	    for(long i = 0; i<num; i++){
-	    	temsum = 0;
-	    	memset(message,'\n',sizeof(message));
-	    	encode_header(message, i);
-
-	    	//keep sending before put all data of a package into buf
-	    	while(bsize>temsum){
-	    		if(pktrate>0)
-		    		msleep(1000/((float)pktrate/sbufsize));
-		    	sendb = send(tcp_sock, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0);
-		    	temsum += sendb;
+		    	//keep sending before put all data of a package into buf
+		    	while(bsize>temsum){
+		    		if(pktrate>0)
+			    		msleep(1000/((float)pktrate/sbufsize));
+			    	sendb = send(tcp_sock, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0);
+			    	temsum += sendb;
+			    }
+			    printf("socket %ld is sent\n", i);
+		    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 		    }
-		    printf("socket %ld is sent\n", i);
-	    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
-	    }
-	    msleep(stat_ms);
-	    close(tcp_sock);	
+		    msleep(stat_ms);
+		    close(tcp_sock);	
+		}
+
+		if (type==SOCK_DGRAM)
+		{
+			close(tcp_sock);
+			if (bind(sockfd, (struct sockaddr *)&myaddr,
+	                            sizeof(myaddr)) <0) {
+	            perror("bind failed!");
+	            exit(1);
+	    	}
+			int temsum;
+			int sendb;
+			ES_Timer timer;
+		    timer.Start();
+
+		    for(long i = 0; i<num; i++){
+		    	temsum = 0;
+		    	memset(message,'\n',sizeof(message));
+		    	encode_header(message, i);
+
+		    	//keep sending before put all data of a package into buf
+		    	while(bsize>temsum){
+		    		if(pktrate>0)
+			    		msleep(1000/((float)pktrate/sbufsize));
+			    	sendb = sendto(sockfd, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0, (struct sockaddr *)&info,sizeof(info));
+			    	temsum += sendb;
+			    }
+		    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
+		    }
+		}
 	}
 
-	if (type==SOCK_DGRAM)
+	if (mode==RECV)
 	{
-		close(tcp_sock);
-		if (bind(sockfd, (struct sockaddr *)&myaddr,
-                            sizeof(myaddr)) <0) {
-            perror("bind failed!");
-            exit(1);
-    	}
-		int temsum;
-		int sendb;
-		ES_Timer timer;
-	    timer.Start();
-
-	    for(long i = 0; i<num; i++){
-	    	temsum = 0;
-	    	memset(message,'\n',sizeof(message));
-	    	encode_header(message, i);
-
-	    	//keep sending before put all data of a package into buf
-	    	while(bsize>temsum){
-	    		if(pktrate>0)
-		    		msleep(1000/((float)pktrate/sbufsize));
-		    	sendb = sendto(sockfd, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0, (struct sockaddr *)&info,sizeof(info));
-		    	temsum += sendb;
-		    }
-	    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
-	    }
+		if (type==SOCK_STREAM)
+		{
+			while(1)
+				if(recv(tcp_sock,recvBuffer,rbufsize,0)<0)
+					perror("error: ");
+		}
 	}
 }
 
