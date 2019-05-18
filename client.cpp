@@ -63,6 +63,7 @@ void showSendSet(SendSet *s_set){
 	printf("SendSet->pktrate: %ld\n", s_set->pktrate);
 	printf("SendSet->num: %ld\n", s_set->num);
 	printf("SendSet->sbufsize: %ld\n", s_set->sbufsize);
+	printf("SendSet->sent: %ld\n", s_set->sent);
 }
 
 void showRecvSet(RecvSet *r_set){
@@ -317,7 +318,7 @@ void client(){
     struct Netprobe np = {mode?0:1, type};
 
     //set the send set
-    SendSet s_set = {bsize, pktrate, num, sbufsize};
+    SendSet s_set = {bsize, pktrate, num, sbufsize, 0};
 
     //set the recv set
     RecvSet r_set = {bsize, rbufsize, 0};

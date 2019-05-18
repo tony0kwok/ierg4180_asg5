@@ -63,6 +63,7 @@ void showSendSet(SendSet *s_set){
 	printf("SendSet->pktrate: %ld\n", s_set->pktrate);
 	printf("SendSet->num: %ld\n", s_set->num);
 	printf("SendSet->sbufsize: %ld\n", s_set->sbufsize);
+	printf("SendSet->sent: %ld\n", s_set->sent);
 }
 
 void showRecvSet(RecvSet *r_set){
@@ -232,6 +233,17 @@ int main(int argc, char** argv){
 	SendSet sendset[100];
 	RecvSet recvset[100];
 
+	Netsock ns[200];
+	int netsockmax = 0;
+
+	//set up the netsock
+	for (int i = 0; i < 200; i++)
+	{
+		(ns+i)->addrlen = sizeof((ns+i)->clientInfo);
+    	bzero(&((ns+i)->clientInfo),sizeof((ns+i)->clientInfo));
+	}
+	//==========================
+
 	char *sendBuffer = (char *) malloc(sizeof(char)*sbufsize);
 	char *recvBuffer = (char *) malloc(sizeof(char)*rbufsize);
 	memset(sendBuffer, '\0', sbufsize);
@@ -299,16 +311,29 @@ int main(int argc, char** argv){
 	    if (udpsockfd>max)
 	    	max = udpsockfd;
 
+	    //add all sockfd in ns array
+	    for (int i = 0; i < netsockmax; i++)
+	    {
+	    	if (ns[i].sockfd==0)
+	    	{
+	    		continue;
+	    	}
+	    	FD_SET(ns[i].sockfd, &sock_fds);
+	    	if (ns[i].sockfd>max)
+	    	{
+	    		max=ns[i].sockfd;
+	    	}
+	    }
+
 	    //add all connected tcp into fd set
-	    for(int i=0;i<tcpmax;i++){
+	    /*for(int i=0;i<tcpmax;i++){
 	    	if (tcpClientSockfd[i]==0)	//means Sockfd expired
 	    		continue;
 		    FD_SET(tcpClientSockfd[i],&sock_fds);
 		    if (tcpClientSockfd[i]>max)
 		    	max = tcpClientSockfd[i];
-		}
+		}*/
 
-	    printf("%d\n", stat_ms);
 	    printf("FD SET %d\n", n);
 	    n++;
 
@@ -317,18 +342,34 @@ int main(int argc, char** argv){
 			exit(1);
 		}
 
-		for (int i = 0; i < tcpmax; i++)
+		for (int i = 0; i < netsockmax; i++)
 		{
 			int result;
-			printf("tcpClientSockfd[i] = %d\n", tcpClientSockfd[i]);
-			//recv(tcpClientSockfd[i],recvBuffer,sizeof(recvBuffer),0);
-			//printf("%s\n", recvBuffer);
-			if(FD_ISSET(tcpClientSockfd[i], &sock_fds)){
-				if(result = recv(tcpClientSockfd[i],recvBuffer,rbufsize,0)>0);
-					printf("recving tcp message from %d\n", i);
-				if (result<=0)
+			printf("ns[%d].sockfd = %d\n", i, ns[i].sockfd);
+			printf("ns[%d].timer = %ld\n", i, ns[i].timer.Elapsed());
+			//do receiving
+			if(ns[i].np->mode==RECV){
+				if(FD_ISSET(ns[i].sockfd, &sock_fds)){
+					//apply to both tcp and udp
+					if(result = recv(ns[i].sockfd,recvBuffer,rbufsize,0)>0);
+						printf("recving tcp message from %s\n, fd %d\n", inet_ntoa(ns[i].clientInfo.sin_addr), ns[i].sockfd);
+					if (result<=0)
+					{
+						ns[i].sockfd=0;
+					}
+				}
+			}
+			else
+			if (ns[i].np->mode==SEND)
+			{
+				if (ns[i].np->proto==SOCK_STREAM)
 				{
-					tcpClientSockfd[i]=0;
+					/* code */
+				}
+				else
+				if (ns[i].np->proto==SOCK_DGRAM)
+				{
+					/* code */
 				}
 			}
 		}
@@ -351,40 +392,45 @@ int main(int argc, char** argv){
 
 		if (FD_ISSET(listen_sockfd, &sock_fds))
 		{
-			tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)&clientInfo, &addrlen);
+			tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)&(ns[netsockmax].clientInfo), &addrlen);
 			printf("accepted\n");
 			if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
 			{
+				//set the ns
 				printf("tcpClientSockfd[tcpmax] = %d\n", tcpClientSockfd[tcpmax]);
-				struct Netprobe *request = request_decode(recvBuffer);
-				showNetprobe(request);
+				ns[netsockmax].np = request_decode(recvBuffer);
+				showNetprobe(ns[netsockmax].np);
+				//=====================================
 
-				if (request->mode==RECV)
+				if (ns[netsockmax].np->mode==RECV)
 					{
 						printf("mode: recv\n");
-						RecvSet *r_set = recvset_decode(recvBuffer+sizeof(struct Netprobe));
-						showRecvSet(r_set);
+						ns[netsockmax].r_set = recvset_decode(recvBuffer+sizeof(struct Netprobe));
+						showRecvSet(ns[netsockmax].r_set);
 					}
-				if (request->mode==SEND)
+				if (ns[netsockmax].np->mode==SEND)
 					{
 						printf("mode: send\n");
-						SendSet *s_set = sendset_decode(recvBuffer+sizeof(struct Netprobe));
-					    showSendSet(s_set);
+						ns[netsockmax].s_set = sendset_decode(recvBuffer+sizeof(struct Netprobe));
+					    showSendSet(ns[netsockmax].s_set);
 					}
 
-				if(request->proto==SOCK_STREAM){
+				if(ns[netsockmax].np->proto==SOCK_STREAM){
 					/*while(1){
 						if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
 							printf("%s\n", recvBuffer);
 					}*/
+					ns[netsockmax].sockfd = tcpClientSockfd[tcpmax];
 					tcpmax++;
+				}
+				if(ns[netsockmax].np->proto==SOCK_DGRAM){
+					//close(tcpClientSockfd[tcpmax]);
+					udpClientInfo[udpmax] = clientInfo;
+					udpmax++;
+				}
+				ns[netsockmax].timer.Start();
+				netsockmax++;
 
-				}
-				if(request->proto==SOCK_DGRAM){
-				//close(tcpClientSockfd[tcpmax]);
-				udpClientInfo[udpmax] = clientInfo;
-				udpmax++;
-				}
 				printf("tcp num = %d, udp num = %d\n",tcpmax,udpmax);
 			}
 			//server_decode()
