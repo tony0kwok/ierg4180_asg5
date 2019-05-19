@@ -221,30 +221,30 @@ char *send_stat_cal(int usec_time, int package_no){
 }
 
 char *recv_stat_cal(long usec_time, int package_no){
-	static long recieved = 0, max = 0;
+	static long received = 0, max = 0;
 	static long previous_time = 0, pretrans_time = 0;
 	static long deltasum = 0;
 	static long lost = 0;
 	double jitter = 0;
 	if (package_no>max)
 		max = package_no;
-	recieved++;
-	lost = max+1 - recieved;
-	double lostrate = (double)lost/recieved;
-	double rate = (double)bsize*recieved*1000/usec_time;
+	received++;
+	lost = max+1 - received;
+	double lostrate = (double)lost/received;
+	double rate = (double)bsize*received*1000/usec_time;
 	
-	if (recieved>=2){
+	if (received>=2){
 		if (int delta = usec_time - previous_time - pretrans_time>0)
 			deltasum += delta;
 		else
 			deltasum -= delta;
 	}
-	jitter = deltasum/(float)recieved;
+	jitter = deltasum/(float)received;
 	pretrans_time = usec_time - previous_time;
 	previous_time = usec_time;
 
 	char *output = (char *)malloc(100);
-	sprintf(output, "Pkts [%ld] Lost [%ld, %.2lf%%] Rate [%.2lfMbps] Jitter [%.2lfus]", recieved, lost, lostrate, rate, jitter);
+	sprintf(output, "Pkts [%ld] Lost [%ld, %.2lf%%] Rate [%.2lfMbps] Jitter [%.2lfus]", received, lost, lostrate, rate, jitter);
 	return output;
 }
 
@@ -327,8 +327,8 @@ void client(){
     request_buf = request_encode(np);
     struct Netprobe *new_np = request_decode(request_buf);
     //if mode is RECV, set host to SEND mode
-    printf("hostmode = %d, proto = %d\n", new_np->mode?0:1, new_np->proto);
-    printf("send to host: %s\n", hostname);
+    //printf("hostmode = %d, proto = %d\n", new_np->mode?0:1, new_np->proto);
+    printf("host ip: %s\n", inet_ntoa(info.sin_addr));
 
     memset(message,'\n',sizeof(message));
     memcpy(message, request_buf, sizeof(struct Netprobe));
@@ -350,7 +350,7 @@ void client(){
     	request_size = sizeof(struct Netprobe)+sizeof(SendSet);
     }
 
-    struct Netprobe *nnp = request_decode(message);
+    /*struct Netprobe *nnp = request_decode(message);
     showNetprobe(nnp);
     if (mode==SEND){
 	    RecvSet *rr_set = recvset_decode(message+sizeof(struct Netprobe));
@@ -359,14 +359,9 @@ void client(){
     if (mode==RECV){
 	    SendSet *ss_set = sendset_decode(message+sizeof(struct Netprobe));
 	    showSendSet(ss_set);
-	}
+	}*/
 
     int sendb_request;
-
-    for (int i = 0; i < request_size; i++)
-    {
-    	printf("%u\n", message[i]);
-    }
 
 	//keep sending before put all data of a package into buf
 	if (sendb_request = send(tcp_sock, message, request_size, 0)<=0)
@@ -378,7 +373,6 @@ void client(){
     //finish request sending===========================
 
 
-    msleep(1000);
     //check if the server receive the request
     /*while(1){
     	if(int recvb = recv(tcp_sock, recvbuffer, 1000, 0)>0)
@@ -408,7 +402,7 @@ void client(){
 			    printf("socket %ld is sent\n", i);
 		    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 		    }
-		    msleep(stat_ms);
+		    msleep(2*stat_ms);
 		    close(tcp_sock);	
 		}
 
@@ -437,8 +431,10 @@ void client(){
 			    	sendb = sendto(sockfd, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0, (struct sockaddr *)&info,sizeof(info));
 			    	temsum += sendb;
 			    }
+			    printf("socket %ld is sent\n", i);
 		    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 		    }
+		    return;
 		}
 	}
 
@@ -471,7 +467,7 @@ void client(){
 		        	}
 		    		if (recvb==0)
 		    		{
-		    			printf("Packages all recieved.\n");
+		    			printf("Packages all received.\n");
 		    			close(tcp_sock);
 		    			return;
 		    		}
@@ -483,25 +479,24 @@ void client(){
 		    	//printf("This is package %d", decode_header(outputBuffer));
 		        sprintf(stat, "%s\n", recv_stat_cal(timer.ElapseduSec(),decode_header(outputBuffer)));
 		        r_set.received++;
-		        /*if (r_set.received>=s_set.sent)
+		        if (r_set.received>=s_set.num)
 		        {
-		        	msleep(3*stat_ms);
+		        	msleep(2*stat_ms);
+		        	printf("Packages all received.\n");
 		        	close(tcp_sock);
 		        	return;
-		        }*/
+		        }
 		    }
 		}
 		else
 		if (type==SOCK_DGRAM)
 		{
-			printf("udp recv\n");
 			close(tcp_sock);
 			if (bind(sockfd, (struct sockaddr *)&myaddr,
 	                            sizeof(myaddr)) <0) {
 	            perror("bind failed!");
 	            exit(1);
 	    	}
-	    	printf("udp_sock port = %d\n", myaddr.sin_port);
 	    	ES_Timer timer;
 		    timer.Start();
 			int temsum;
@@ -525,6 +520,14 @@ void client(){
 
 	            }
 	            sprintf(stat, "%s\n", recv_stat_cal(timer.ElapseduSec(),decode_header(outputBuffer))); 
+				r_set.received++;
+		        if (r_set.received>=s_set.num)
+		        {
+		        	msleep(2*stat_ms);
+		        	printf("Packages all received.\n");
+		        	close(sockfd);
+		        	return;
+		        }
 			}
 		}
 	}

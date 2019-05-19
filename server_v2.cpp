@@ -235,8 +235,7 @@ void* threadfunc(void* data){
     close(sockfd);
 }*/
 
-int main(int argc, char** argv){
-	setting(argc, argv);
+void server(){
 	SendSet sendset[100];
 	RecvSet recvset[100];
 
@@ -269,6 +268,10 @@ int main(int argc, char** argv){
     }
     int udpClientMode[100];
     int udpmax = 0;
+
+    //for checking available tcp and udp socket
+    int available_tcp = 0;
+    int available_udp = 0;
 
 	//SOCKET SETUP
 	int listen_sockfd = 0, udpsockfd = 0;
@@ -358,8 +361,6 @@ int main(int argc, char** argv){
 		for (int i = 0; i < netsockmax; i++)
 		{
 			int result;
-			printf("ns[%d].sockfd = %d\n", i, ns[i].sockfd);
-			printf("ns[%d].timer = %ld\n", i, ns[i].timer.Elapsed());
 			//do receiving
 			if(ns[i].np->mode==RECV){
 				if(FD_ISSET(ns[i].sockfd, &read_fds)){
@@ -369,6 +370,11 @@ int main(int argc, char** argv){
 					if (result<=0)
 					{
 						closeNetsock(ns+i);
+						if (ns[i].np->proto==SOCK_STREAM)
+							available_tcp--;
+						else
+						if (ns[i].np->proto==SOCK_DGRAM)
+							available_udp--;
 					}
 				}
 			}
@@ -394,9 +400,11 @@ int main(int argc, char** argv){
 						    	//keep sending before put all data of a package into buf
 						    	while(ns[i].s_set->bsize>temsum){
 							    	sendb = send(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize - temsum: ns[i].s_set->sbufsize, 0);
-							    	if (sendb<0)
+							    	if (sendb<=0)
 							    	{
 							    		perror("error: ");
+							    		closeNetsock(ns+i);
+							    		available_tcp--;
 							    	}
 							    	temsum += sendb;
 							    }
@@ -416,9 +424,11 @@ int main(int argc, char** argv){
 						    	//keep sending before put all data of a package into buf
 						    	while(ns[i].s_set->bsize>temsum){
 							    	sendb = send(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize - temsum: ns[i].s_set->sbufsize, 0);
-							    	if (sendb<0)
+							    	if (sendb<=0)
 							    	{
 							    		perror("error: ");
+							    		closeNetsock(ns+i);
+							    		available_tcp--;
 							    	}
 							    	temsum += sendb;
 							    }
@@ -434,6 +444,29 @@ int main(int argc, char** argv){
 							printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
 							printf("sent %ld package\n", ns[i].s_set->sent);
 							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);
+							if (ns[i].s_set->pktrate==0)
+							{
+								//need to improve
+						    	long temsum = 0;
+						    	long sendb;
+						    	encode_header(sendBuffer, ns[i].s_set->sent);
+
+						    	//keep sending before put all data of a package into buf
+						    	while(ns[i].s_set->bsize>temsum){
+							    	sendb = sendto(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize-temsum: ns[i].s_set->sbufsize, 0, (struct sockaddr *)(&(ns[i].clientInfo)),sizeof(ns[i].clientInfo));
+							    	if (sendb<=0)
+							    	{
+							    		perror("error: ");
+							    		closeNetsock(ns+i);
+							    		available_udp--;
+							    	}
+							    	temsum += sendb;
+							    }
+
+							    ns[i].s_set->sent += 1;
+							    printf("sending message: %s\n", sendBuffer);
+							    //===============
+							}
 							if (ns[i].s_set->sent < (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000))
 							{
 								//need to improve
@@ -444,9 +477,11 @@ int main(int argc, char** argv){
 						    	//keep sending before put all data of a package into buf
 						    	while(ns[i].s_set->bsize>temsum){
 							    	sendb = sendto(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize-temsum: ns[i].s_set->sbufsize, 0, (struct sockaddr *)(&(ns[i].clientInfo)),sizeof(ns[i].clientInfo));
-							    	if (sendb<0)
+							    	if (sendb<=0)
 							    	{
 							    		perror("error: ");
+							    		closeNetsock(ns+i);
+							    		available_udp--;
 							    	}
 							    	temsum += sendb;
 							    }
@@ -457,8 +492,14 @@ int main(int argc, char** argv){
 							}
 						}
 					}
-					else
+					else{
 						closeNetsock(ns+i);
+						if (ns[i].np->proto==SOCK_STREAM)
+							available_tcp--;
+						else
+						if (ns[i].np->proto==SOCK_DGRAM)
+							available_udp--;
+					}
 				}
 			}
 		}
@@ -482,24 +523,20 @@ int main(int argc, char** argv){
 		if (FD_ISSET(listen_sockfd, &read_fds))
 		{
 			tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)(&(ns[netsockmax].clientInfo)), &(ns[netsockmax].addrlen));
-			printf("accepted\n");
 			if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
 			{
 				//set the ns
-				printf("tcpClientSockfd[tcpmax] = %d\n", tcpClientSockfd[tcpmax]);
 				ns[netsockmax].np = request_decode(recvBuffer);
 				showNetprobe(ns[netsockmax].np);
 				//=====================================
 
 				if (ns[netsockmax].np->mode==RECV)
 					{
-						printf("mode: recv\n");
 						ns[netsockmax].r_set = recvset_decode(recvBuffer+sizeof(struct Netprobe));
 						showRecvSet(ns[netsockmax].r_set);
 					}
 				if (ns[netsockmax].np->mode==SEND)
 					{
-						printf("mode: send\n");
 						ns[netsockmax].s_set = sendset_decode(recvBuffer+sizeof(struct Netprobe));
 					    showSendSet(ns[netsockmax].s_set);
 					}
@@ -511,6 +548,7 @@ int main(int argc, char** argv){
 					}*/
 					ns[netsockmax].sockfd = tcpClientSockfd[tcpmax];
 					tcpmax++;
+					available_tcp++;
 				}
 				if(ns[netsockmax].np->proto==SOCK_DGRAM){
 					//close(tcpClientSockfd[tcpmax]);
@@ -518,26 +556,27 @@ int main(int argc, char** argv){
 					ns[netsockmax].sockfd = udpsockfd;
 					udpClientInfo[udpmax] = clientInfo;
 					udpmax++;
+					available_udp++;
+					
+					//we sleep for 1 second because I found it is too fast for client to respond when pktrate is 0
+					msleep(1000);
 				}
 				ns[netsockmax].timer.Start();
 				netsockmax++;
-
-				printf("tcp num = %d, udp num = %d\n",tcpmax,udpmax);
 			}
 			//server_decode()
 
 		}
+		printf("available_tcp = %d, available_udp = %d\n", available_tcp, available_udp);
     }
 
+	return;
+}
 
-	struct Netprobe np = {SEND, SOCK_DGRAM};
-	char *buffer = request_encode(np);
-	for (int i = 0; i < sizeof(buffer); i++)
-	{
-		printf("%02X ", buffer[i]);
-	}
-	struct Netprobe *new_np = request_decode(buffer);
-	printf("%d\n", new_np->proto);
-	printf("%d\n", new_np->mode);
+int main(int argc, char** argv){
+	setting(argc, argv);
+
+	server();
+
 	return 1;
 }
