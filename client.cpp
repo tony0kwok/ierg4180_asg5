@@ -280,6 +280,7 @@ void client(){
 
     struct sockaddr_in info, myaddr;	//set address info
     socklen_t addrlen = sizeof(info);
+    socklen_t myaddr_addrlen = sizeof(info);
     bzero(&info,sizeof(info));
     info.sin_family = domain;
     struct hostent *he;
@@ -292,21 +293,8 @@ void client(){
 
     //myaddr for returning
     bzero((char *)&myaddr, sizeof(myaddr));
-    myaddr.sin_family = AF_INET;
-    myaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    myaddr.sin_port = htons(4190);
-    printf("loading\n");
 
-    //bind the request socket for following udp return
-    if (mode==RECV&&type==SOCK_DGRAM)
-    {
-	    if (bind(tcp_sock, (struct sockaddr *)&myaddr,
-		                            sizeof(myaddr)) <0) {
-		            perror("bind failed!");
-		            exit(1);
-		    	}
-		printf("tcp_sock port = %d\n", myaddr.sin_port);
-	}
+    printf("loading\n");
 
     //Request====================
 	//send request to tell server TCP or UDP, SEND or RECV
@@ -315,6 +303,8 @@ void client(){
         printf("Connection error");
         exit(1);
     }
+
+    getsockname(tcp_sock, (sockaddr *)&myaddr, &myaddr_addrlen);
 
     int count = 0;
     int sendb;
