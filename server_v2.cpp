@@ -443,7 +443,7 @@ int main(int argc, char** argv){
 
 						    	//keep sending before put all data of a package into buf
 						    	while(ns[i].s_set->bsize>temsum){
-							    	sendb = sendto(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize-temsum: ns[i].s_set->sbufsize, 0, (struct sockaddr *)&(ns[i].clientInfo),sizeof(ns[i].clientInfo));
+							    	sendb = sendto(ns[i].sockfd, sendBuffer+temsum, ns[i].s_set->sbufsize > ns[i].s_set->bsize-temsum ? ns[i].s_set->bsize-temsum: ns[i].s_set->sbufsize, 0, (struct sockaddr *)(&(ns[i].clientInfo)),sizeof(ns[i].clientInfo));
 							    	if (sendb<0)
 							    	{
 							    		perror("error: ");
@@ -481,7 +481,7 @@ int main(int argc, char** argv){
 
 		if (FD_ISSET(listen_sockfd, &read_fds))
 		{
-			tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)&(ns[netsockmax].clientInfo), &addrlen);
+			tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)(&(ns[netsockmax].clientInfo)), &(ns[netsockmax].addrlen));
 			printf("accepted\n");
 			if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
 			{

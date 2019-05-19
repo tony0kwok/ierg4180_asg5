@@ -294,11 +294,19 @@ void client(){
     bzero((char *)&myaddr, sizeof(myaddr));
     myaddr.sin_family = AF_INET;
     myaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    myaddr.sin_port = htons(0);
+    myaddr.sin_port = htons(4190);
     printf("loading\n");
 
-
-
+    //bind the request socket for following udp return
+    if (mode==RECV&&type==SOCK_DGRAM)
+    {
+	    if (bind(tcp_sock, (struct sockaddr *)&myaddr,
+		                            sizeof(myaddr)) <0) {
+		            perror("bind failed!");
+		            exit(1);
+		    	}
+		printf("tcp_sock port = %d\n", myaddr.sin_port);
+	}
 
     //Request====================
 	//send request to tell server TCP or UDP, SEND or RECV
@@ -446,25 +454,88 @@ void client(){
 
 	if (mode==RECV)
 	{
+		//set buffer for storing temporary data
+		char *outputBuffer = (char *)malloc(bsize);
+		char *inputBuffer = (char *)malloc(rbufsize);
+
+
 		if (type==SOCK_STREAM)
 		{
-			while(1)
-				if(recv(tcp_sock,recvBuffer,rbufsize,0)<0)
-					perror("error: ");
+			strcpy(stat, "Packet transmitting..");
+	    
+		    int recvb = 0;
+		    int temsum = 0;
+
+		    int count = 0;
+
+		    ES_Timer timer;
+		    timer.Start();
+		    while(1){
+		    	temsum = 0;
+		    	memset(outputBuffer, '\0', bsize);
+		    	while(bsize>temsum){
+		        	recvb = recv(tcp_sock,inputBuffer,bufsize,0);
+		        	if (recvb<0)
+		        	{
+		        		perror("tcp recv error: ");
+		        	}
+		    		if (recvb==0)
+		    		{
+		    			printf("Packages all recieved.\n");
+		    			close(tcp_sock);
+		    			return;
+		    		}
+		    		//printf("BUF SIZE=%d\n", recvb);
+		    		strcpy(outputBuffer+temsum, inputBuffer);
+		    		//printf("%s\n", outputBuffer);
+		    		temsum += recvb;
+		    	}
+		    	//printf("This is package %d", decode_header(outputBuffer));
+		        sprintf(stat, "%s\n", recv_stat_cal(timer.ElapseduSec(),decode_header(outputBuffer)));
+		        r_set.received++;
+		        /*if (r_set.received>=s_set.sent)
+		        {
+		        	msleep(3*stat_ms);
+		        	close(tcp_sock);
+		        	return;
+		        }*/
+		    }
 		}
 		else
 		if (type==SOCK_DGRAM)
 		{
+			printf("udp recv\n");
 			close(tcp_sock);
 			if (bind(sockfd, (struct sockaddr *)&myaddr,
 	                            sizeof(myaddr)) <0) {
 	            perror("bind failed!");
 	            exit(1);
 	    	}
+	    	printf("udp_sock port = %d\n", myaddr.sin_port);
+	    	ES_Timer timer;
+		    timer.Start();
+			int temsum;
+			int nbytes;
+			strcpy(stat, "Accepting Datagram..");
+			while(1){
+				temsum = 0;
+				memset(outputBuffer, '\0', bsize);
+				while(bsize>temsum){
 
-			while(1)
-				if(recvfrom(sockfd, recvBuffer, rbufsize, 0, (struct sockaddr*)&info, &addrlen) < 0)
-					perror("error: ");
+					//sockfd is udp socket, but we use tcp_sock...
+					if (nbytes = recvfrom(sockfd, inputBuffer, rbufsize, 0, (struct sockaddr*)&info, &addrlen) < 0) {
+		                        perror ("could not read datagram!!");
+		                        continue;
+		                }
+		            strcpy(outputBuffer+temsum, inputBuffer);
+		            temsum+=nbytes;
+
+		            //force the loop end
+		            temsum=bsize;
+
+	            }
+	            sprintf(stat, "%s\n", recv_stat_cal(timer.ElapseduSec(),decode_header(outputBuffer))); 
+			}
 		}
 	}
 }
