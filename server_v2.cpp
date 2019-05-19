@@ -108,7 +108,7 @@ int setting(int argc, char** argv){
 
 	stat_ms = 500;
 	memset(stat, '\0', sizeof(stat));
-	strcpy(stat, "Accepting connection...");
+	strcpy(stat, "TCP Clients [0], UDP Clients [0]\n");
 
 	rbufsize = 1000;
 	sbufsize = 1000;
@@ -190,7 +190,7 @@ char *recv_stat_cal(long usec_time, int package_no){
 	char *output = (char *)malloc(100);
 	sprintf(output, "Pkts [%lld] Lost [%lld, %.2lf%%] Rate [%.2lfMbps] Jitter [%.2lfus]", recieved, lost, lostrate, rate, jitter);
 	return output;
-}
+}*/
 
 void* threadfunc(void* data){
 	ES_Timer timer;
@@ -203,7 +203,7 @@ void* threadfunc(void* data){
 		printf("%s\n", elapsedtime);
 	}
 	return NULL;
-}*/
+}
 
 /*int tcp_send(int socket, SendSet set){
 	int count = 0;
@@ -306,7 +306,6 @@ void server(){
    	//select set up
    	int max = 0;
    	fd_set read_fds, write_fds;
-   	int n = 0;
 
     while(1){
     	//set up the time out
@@ -350,9 +349,6 @@ void server(){
 		    	max = tcpClientSockfd[i];
 		}*/
 
-	    printf("FD SET %d\n", n);
-	    n++;
-
 		if(result = select(max+1, &read_fds, &write_fds, NULL, NULL)<0){
 			perror("select error: ");
 			exit(1);
@@ -365,8 +361,9 @@ void server(){
 			if(ns[i].np->mode==RECV){
 				if(FD_ISSET(ns[i].sockfd, &read_fds)){
 					//apply to both tcp and udp
-					if(result = recv(ns[i].sockfd,recvBuffer,rbufsize,0)>0);
-						printf("recving tcp message from %s\n, fd %d\n", inet_ntoa(ns[i].clientInfo.sin_addr), ns[i].sockfd);
+					if(result = recv(ns[i].sockfd,recvBuffer,rbufsize,0)>0){
+						//printf("recving tcp message from %s\n, fd %d\n", inet_ntoa(ns[i].clientInfo.sin_addr), ns[i].sockfd);
+					}
 					if (result<=0)
 					{
 						closeNetsock(ns+i);
@@ -387,9 +384,9 @@ void server(){
 						if (ns[i].np->proto==SOCK_STREAM)
 						{
 							//if number of socket sent is less than it should be
-							printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
+							/*printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
 							printf("sent %ld package\n", ns[i].s_set->sent);
-							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);
+							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);*/
 							if (ns[i].s_set->pktrate==0)
 					    	{
 						    	//need to improve, because it send one whole package in a loop
@@ -410,7 +407,6 @@ void server(){
 							    }
 
 							    ns[i].s_set->sent += 1;
-							    printf("sending message: %s\n", sendBuffer);
 							    //==============================
 					    	}
 						    else
@@ -434,16 +430,15 @@ void server(){
 							    }
 
 							    ns[i].s_set->sent += 1;
-							    printf("sending message: %s\n", sendBuffer);
 							    //==============================
 							}
 						}
 						else
 						if (ns[i].np->proto==SOCK_DGRAM)
 						{
-							printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
+							/*printf("num of package should be sent%ld\n", (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000));
 							printf("sent %ld package\n", ns[i].s_set->sent);
-							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);
+							printf("time :%lds\n", ns[i].timer.Elapsed()/1000);*/
 							if (ns[i].s_set->pktrate==0)
 							{
 								//need to improve
@@ -464,7 +459,6 @@ void server(){
 							    }
 
 							    ns[i].s_set->sent += 1;
-							    printf("sending message: %s\n", sendBuffer);
 							    //===============
 							}
 							if (ns[i].s_set->sent < (long)(((double)ns[i].timer.Elapsed())/ns[i].s_set->bsize*ns[i].s_set->pktrate/1000))
@@ -487,7 +481,6 @@ void server(){
 							    }
 
 							    ns[i].s_set->sent += 1;
-							    printf("sending message: %s\n", sendBuffer);
 							    //===============
 							}
 						}
@@ -527,25 +520,18 @@ void server(){
 			{
 				//set the ns
 				ns[netsockmax].np = request_decode(recvBuffer);
-				showNetprobe(ns[netsockmax].np);
 				//=====================================
 
 				if (ns[netsockmax].np->mode==RECV)
 					{
 						ns[netsockmax].r_set = recvset_decode(recvBuffer+sizeof(struct Netprobe));
-						showRecvSet(ns[netsockmax].r_set);
 					}
 				if (ns[netsockmax].np->mode==SEND)
 					{
 						ns[netsockmax].s_set = sendset_decode(recvBuffer+sizeof(struct Netprobe));
-					    showSendSet(ns[netsockmax].s_set);
 					}
 
 				if(ns[netsockmax].np->proto==SOCK_STREAM){
-					/*while(1){
-						if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
-							printf("%s\n", recvBuffer);
-					}*/
 					ns[netsockmax].sockfd = tcpClientSockfd[tcpmax];
 					tcpmax++;
 					available_tcp++;
@@ -557,7 +543,7 @@ void server(){
 					udpClientInfo[udpmax] = clientInfo;
 					udpmax++;
 					available_udp++;
-					
+
 					//we sleep for 1 second because I found it is too fast for client to respond when pktrate is 0
 					msleep(1000);
 				}
@@ -567,7 +553,7 @@ void server(){
 			//server_decode()
 
 		}
-		printf("available_tcp = %d, available_udp = %d\n", available_tcp, available_udp);
+		sprintf(stat, "TCP Clients [%d], UDP Clients [%d]\n", available_tcp, available_udp);
     }
 
 	return;
@@ -575,6 +561,10 @@ void server(){
 
 int main(int argc, char** argv){
 	setting(argc, argv);
+
+	//print the stat
+	pthread_t t;
+	pthread_create(&t, NULL, threadfunc, NULL);
 
 	server();
 
