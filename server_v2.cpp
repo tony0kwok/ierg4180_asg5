@@ -274,6 +274,7 @@ void* threadfunc(void* data){
 }
 
 void *sockThread(void *arg){
+	ES_Timer reuse_timer;
 	while(1){
 		sprintf(stat, "ThreadPool [%d|%d] TCP Clients [%d] UDP Clients [%d]", threadnum, taken_thread_tcp+taken_thread_udp, taken_thread_tcp, taken_thread_udp);
 		pthread_mutex_lock(&queueMutex);
@@ -311,6 +312,7 @@ void *sockThread(void *arg){
 		memset(recvBuffer, '\0', rbufsize);
 
 		int result;
+
 		//do receiving
 		if(ns->np->mode==RECV){
 			//apply to both tcp and udp

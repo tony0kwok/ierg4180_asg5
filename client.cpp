@@ -133,11 +133,12 @@ int setting(int argc, char** argv){
 
 	strcpy(hostname, "localhost");
 
-	const char *optstring = "srm:p:k:b:u:t:n:o:h:l:";
+	const char *optstring = "srem:p:k:b:u:t:n:o:h:l:";
     int c;
     struct option opts[] = {
         {"send", 0, NULL, 's'},
         {"recv", 0, NULL, 'r'},
+        {"response", 0, NULL, 'e'},
         {"stat", 1, NULL, 'm'},
         {"rport", 1, NULL, 'p'},
         {"pktsize", 1, NULL, 'k'},
@@ -168,6 +169,8 @@ int setting(int argc, char** argv){
         		break;
         	case 'n':
         		num = atol(optarg);
+        		if (num==0)
+        			num = 999999999;
         		break;
         	case 't':
         		pktrate = atol(optarg);
@@ -197,6 +200,9 @@ int setting(int argc, char** argv){
             case 'r':
                 mode = RECV;
                 break;
+            case 'e':
+            	mode = 2;
+            	break;
             case '?':
                 printf("unknown option\n");
                 break;
@@ -269,8 +275,211 @@ void client(){
 	char *recvBuffer = (char *) malloc(sizeof(char)*rbufsize);
 	memset(recvBuffer, '\0', sizeof(char)*rbufsize);
 
+    //if the mode is response
+    if (mode==2)
+    {
+    	struct Netprobe np = {1, type};
 
-	int sockfd = socket(domain, type, protocol);
+	    //set the send set
+	    SendSet s_set = {bsize, 0, 1, sbufsize, 0};
+
+	    //set the recv set
+		RecvSet r_set = {bsize, rbufsize, 0};
+
+	    struct sockaddr_in info, myaddr;	//set address info
+	    socklen_t addrlen = sizeof(info);
+	    socklen_t myaddr_addrlen = sizeof(info);
+	    bzero(&info,sizeof(info));
+	    info.sin_family = domain;
+	    struct hostent *he;
+	    if ( (he = gethostbyname(hostname) ) == NULL ) {
+	      exit(1); /* error */
+	  	}
+	    memcpy(&info.sin_addr, he->h_addr_list[0], he->h_length);
+	    //info.sin_addr.s_addr = inet_addr(address);
+	    info.sin_port = htons(port);
+
+	    //myaddr for returning
+	    bzero((char *)&myaddr, sizeof(myaddr));
+
+	    printf("loading\n");
+
+	    //Request====================
+		//send request to tell server TCP or UDP, SEND or RECV
+	    
+	    int count = 0;
+	    int sendb;
+	    int temsum = 0;
+
+
+	    memset(message, '\n', sizeof(message));
+
+    	ES_Timer general_timer;
+    	ES_Timer request_timer;
+    	long max_us = 0;
+    	long min_us = 999999999;
+    	long long sum = 0;
+    	general_timer.Start();
+	    for (int i = 0; i < num; i++)
+    	{
+    		int sockfd = socket(domain, type, protocol);
+			int tcp_sock = socket(domain, SOCK_STREAM, protocol);
+
+			if (sockfd == -1||tcp_sock == -1){
+		        printf("Fail to create a socket.");
+		        return;
+		    }
+
+			int err = connect(tcp_sock,(struct sockaddr *)&info,sizeof(info));
+		    if(err==-1){
+		        printf("Connection error");
+		        exit(1);
+		    }
+
+		    getsockname(tcp_sock, (sockaddr *)&myaddr, &myaddr_addrlen);
+
+
+    		if (pktrate!=0)
+    		{
+    			if (general_timer.ElapseduSec()>1000000/pktrate)
+	    		{
+	    			general_timer.Start();
+	    		}
+	    		else
+	    		usleep(100000/pktrate);
+    		}
+    		
+
+		    char *request_buf;
+		    request_buf = request_encode(np);
+		    struct Netprobe *new_np = request_decode(request_buf);
+		    //if mode is RECV, set host to SEND mode
+		    //printf("hostmode = %d, proto = %d\n", new_np->mode?0:1, new_np->proto);
+		    //printf("host ip: %s\n", inet_ntoa(info.sin_addr));
+
+		    memset(message,'\n',sizeof(message));
+		    memcpy(message, request_buf, sizeof(struct Netprobe));
+
+		    int request_size;
+
+	    	//send send information to server
+	    	//memcpy(message+sizeof(struct Netprobe),(const char*) &s_set,sizeof(SendSet));
+	    	sendset_encode(message+sizeof(struct Netprobe), s_set);
+	    	request_size = sizeof(struct Netprobe)+sizeof(SendSet);
+
+		    /*struct Netprobe *nnp = request_decode(message);
+		    showNetprobe(nnp);
+		    if (mode==SEND){
+			    RecvSet *rr_set = recvset_decode(message+sizeof(struct Netprobe));
+			    showRecvSet(rr_set);
+			}
+		    if (mode==RECV){
+			    SendSet *ss_set = sendset_decode(message+sizeof(struct Netprobe));
+			    showSendSet(ss_set);
+			}*/
+
+		    int sendb_request;
+		    request_timer.Start();
+			//keep sending before put all data of a package into buf
+			if (sendb_request = send(tcp_sock, message, request_size, 0)<=0)
+			{
+				perror("send request error: ");
+			}
+
+			//receive message from server
+			//set buffer for storing temporary data
+			char *outputBuffer = (char *)malloc(bsize);
+			char *inputBuffer = (char *)malloc(rbufsize);
+
+
+			if (type==SOCK_STREAM)
+			{
+				//strcpy(stat, "Packet transmitting..");
+		    
+			    int recvb = 0;
+			    int temsum = 0;
+
+			    int count = 0;
+
+			    ES_Timer timer;
+			    timer.Start();
+			    
+			    //recv message
+		    	temsum = 0;
+		    	memset(outputBuffer, '\0', bsize);
+		    	while(bsize>temsum){
+		        	recvb = recv(tcp_sock,inputBuffer,bufsize,0);
+		        	if (recvb<0)
+		        	{
+		        		perror("tcp recv error: ");
+		        	}
+		    		if (recvb==0)
+		    		{
+		    			printf("Packages all received.\n");
+		    			close(tcp_sock);
+		    			return;
+		    		}
+		    		//printf("BUF SIZE=%d\n", recvb);
+		    		strcpy(outputBuffer+temsum, inputBuffer);
+		    		//printf("%s\n", outputBuffer);
+		    		temsum += recvb;
+		    	}
+		    	r_set.received++;
+			    
+			}
+			else
+			if (type==SOCK_DGRAM)
+			{
+				close(tcp_sock);
+				if (bind(sockfd, (struct sockaddr *)&myaddr,
+		                            sizeof(myaddr)) <0) {
+		            perror("bind failed!");
+		            exit(1);
+		    	}
+		    	ES_Timer timer;
+			    timer.Start();
+				int temsum;
+				int nbytes;
+				//strcpy(stat, "Accepting Datagram..");
+
+				temsum = 0;
+				memset(outputBuffer, '\0', bsize);
+				while(bsize>temsum){
+
+					//sockfd is udp socket, but we use tcp_sock...
+					if (nbytes = recvfrom(sockfd, inputBuffer, rbufsize, 0, (struct sockaddr*)&info, &addrlen) < 0) {
+		                        perror ("could not read datagram!!");
+		                        continue;
+		                }
+		            strcpy(outputBuffer+temsum, inputBuffer);
+		            temsum+=nbytes;
+
+		            //force the loop end
+		            temsum=bsize;
+
+	            }
+	            //sprintf(stat, "%s\n", recv_stat_cal(timer.ElapseduSec(),decode_header(outputBuffer))); 
+				r_set.received++;
+
+			}
+			int ress = request_timer.ElapseduSec();
+			if (max_us<ress)
+			{
+				max_us = ress;
+			}
+			else
+			if (min_us > ress)
+			{
+				min_us = ress;
+			}
+			sum += ress;
+			sprintf(stat, "Replies [%ld] Min [%.1lfms] Max [%.1lfms] Avg [%.1lfms] Jitter [5.2ms]", r_set.received, (double)min_us/1000, (double)max_us/1000, (double)sum/r_set.received/1000);
+			//printf("for loop in %d\n", i);
+	    }
+	}
+    
+
+    int sockfd = socket(domain, type, protocol);
 	int tcp_sock = socket(domain, SOCK_STREAM, protocol);
 
 	if (sockfd == -1||tcp_sock == -1){
@@ -313,8 +522,10 @@ void client(){
 
     memset(message, '\n', sizeof(message));
 
+
     //set netprobe setting request
     struct Netprobe np = {mode?0:1, type};
+
 
     //set the send set
     SendSet s_set = {bsize, pktrate, num, sbufsize, 0};
@@ -399,7 +610,7 @@ void client(){
 			    	sendb = send(tcp_sock, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0);
 			    	temsum += sendb;
 			    }
-			    printf("socket %ld is sent\n", i);
+			    //printf("socket %ld is sent\n", i);
 		    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 		    }
 		    msleep(2*stat_ms);
@@ -431,7 +642,7 @@ void client(){
 			    	sendb = sendto(sockfd, message+temsum, sbufsize>bsize-temsum ? bsize-temsum: sbufsize, 0, (struct sockaddr *)&info,sizeof(info));
 			    	temsum += sendb;
 			    }
-			    printf("socket %ld is sent\n", i);
+			    //printf("socket %ld is sent\n", i);
 		    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
 		    }
 		    return;
