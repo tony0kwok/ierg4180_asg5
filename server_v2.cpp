@@ -14,6 +14,9 @@
 #include <pthread.h>
 
 #include "netprobe.h"
+#include "tinythread.h"
+
+using namespace tthread;
 
 #define SEND 1
 #define RECV 0
@@ -69,7 +72,7 @@ void showSendSet(SendSet *s_set){
 void showRecvSet(RecvSet *r_set){
 	printf("RecvSet->bsize: %ld\n", r_set->bsize);
 	printf("RecvSet->rbufsize: %ld\n", r_set->rbufsize);
-	printf("RecvSet->received: %ld\n", r_set->received);	//wrong name
+	printf("RecvSet->received: %ld\n", r_set->received);
 }
 
 void closeNetsock(Netsock *ns){
@@ -79,6 +82,55 @@ void closeNetsock(Netsock *ns){
 	free(ns->np);
 }
 
+void enqueue(NSQueue *queue, Netsock *ns){
+	//printf("start enqueue\n");
+	NSNode *node = (NSNode*)malloc(sizeof(NSNode));
+	node->ns = ns;
+	node->next = NULL;
+	
+	if (queue->num==0)
+	{
+		queue->front = node;
+	}
+	else
+	{
+		queue->rear->next = node;
+	}
+	queue->rear = node;
+	queue->num += 1;
+	//printf("end enqueue\n");
+}
+
+int dequeue(NSQueue *queue, Netsock **nspointer){
+	if (queue->num==0)
+	{
+		return 0;
+	}
+	//printf("start dequeue\n");
+	*nspointer = queue->front->ns;
+	if (queue->num==1)
+	{
+		free(queue->front);
+		queue->front = NULL;
+		queue->rear = NULL;
+	}
+	else
+	{
+		queue->front = queue->front->next;
+	}
+	queue->num -= 1;
+	//printf("end dequeue\n");
+	return 1;
+}
+
+//=======================================================
+pthread_mutex_t queueMutex;
+pthread_mutex_t numOfTakenMutex;
+int taken_thread_tcp;
+int taken_thread_udp;
+int threadnum;
+
+int mode;
 int protocol;
 int domain;
 char address[40];
@@ -115,17 +167,33 @@ int setting(int argc, char** argv){
 
 	strcpy(hostname, "localhost");
 
-	const char *optstring = "m:p:u:f:l:";
+	taken_thread_tcp = 0;
+	taken_thread_udp = 0;
+	threadnum = 8;
+
+	mode = 4;	//3 = select, 4 = thread
+
+	const char *optstring = "m:p:u:f:l:s:o:";
     int c;
     struct option opts[] = {
         {"stat", 1, NULL, 'm'},
         {"lport", 1, NULL, 'p'},
         {"sbufsize", 1, NULL, 'u'},
         {"rbufsize", 1, NULL, 'f'},
-        {"lhost", 1, NULL, 'l'}
+        {"lhost", 1, NULL, 'l'},
+        {"servermodel", 1, NULL, 's'},
+        {"poolsize", 1, NULL, 'o'}
     };
     while((c = getopt_long_only(argc, argv, optstring, opts, NULL)) != -1) {
         switch(c) {
+        	case 'o':
+        		threadnum = atoi(optarg);
+        	case 's':
+        		if (strcmp(optarg, "select")==0)
+        		{
+        			mode = 3;
+        		}
+        		break;
         	case 'l':
         		strcpy(hostname, optarg);
         		break;
@@ -205,37 +273,375 @@ void* threadfunc(void* data){
 	return NULL;
 }
 
-/*int tcp_send(int socket, SendSet set){
-	int count = 0;
-    int sendb;
-    int temsum = 0;
+void *sockThread(void *arg){
+	while(1){
+		sprintf(stat, "ThreadPool [%d|%d] TCP Clients [%d] UDP Clients [%d]", threadnum, taken_thread_tcp+taken_thread_udp, taken_thread_tcp, taken_thread_udp);
+		pthread_mutex_lock(&queueMutex);
+		Netsock *ns;
+		while(1){
+			if(dequeue((NSQueue *)arg, &ns))	//return false when the queue is empty
+			{
+				//showNetprobe(ns->np);
+				if (ns->np->proto==SOCK_STREAM)
+				{
+					pthread_mutex_lock(&numOfTakenMutex);
+					taken_thread_tcp++;
+					pthread_mutex_unlock(&numOfTakenMutex);
+				}
+				else
+				if (ns->np->proto==SOCK_DGRAM)
+				{
+					pthread_mutex_lock(&numOfTakenMutex);
+					taken_thread_udp++;
+					pthread_mutex_unlock(&numOfTakenMutex);
+				}
+				sprintf(stat, "ThreadPool [%d|%d] TCP Clients [%d] UDP Clients [%d]", threadnum, taken_thread_tcp+taken_thread_udp, taken_thread_tcp, taken_thread_udp);
+				break;
+			}
+			else
+			{
+				//printf("the queue is empty\n");
+			}
+		}
+		pthread_mutex_unlock(&queueMutex);
 
-    ES_Timer timer;
-    timer.Start();
+		char *sendBuffer = (char *) malloc(sizeof(char)*sbufsize);
+		char *recvBuffer = (char *) malloc(sizeof(char)*rbufsize);
+		memset(sendBuffer, '\0', sbufsize);
+		memset(recvBuffer, '\0', rbufsize);
 
-    char *message = (char *)malloc(sbufsize);
+		int result;
+		//do receiving
+		if(ns->np->mode==RECV){
+			//apply to both tcp and udp
+			if(result = recv(ns->sockfd,recvBuffer,rbufsize,0)>0){
+				//printf("recving tcp message from %s\n, fd %d\n", inet_ntoa(ns->clientInfo.sin_addr), ns->sockfd);
+			}
+			if (result<=0)
+			{
+				closeNetsock(ns);
+				if (ns->np->proto==SOCK_STREAM)
+				{
+					pthread_mutex_lock(&numOfTakenMutex);
+					taken_thread_tcp--;
+					pthread_mutex_unlock(&numOfTakenMutex);
+				}
+				else
+				if (ns->np->proto==SOCK_DGRAM)
+				{
+					pthread_mutex_lock(&numOfTakenMutex);
+					taken_thread_udp--;
+					pthread_mutex_unlock(&numOfTakenMutex);
+				}
+				
+				continue;
+			}
+		}
+		else
+		if (ns->np->mode==SEND)
+		{
+			int run = 1;
+			if(ns->s_set->sent<ns->s_set->num){
+				if (ns->np->proto==SOCK_STREAM)
+				{
+					//if number of socket sent is less than it should be
+					/*printf("num of package should be sent%ld\n", (long)(((double)ns->timer.Elapsed())/ns->s_set->bsize*ns->s_set->pktrate/1000));
+					printf("sent %ld package\n", ns->s_set->sent);
+					printf("time :%lds\n", ns->timer.Elapsed()/1000);*/
+					if (ns->s_set->pktrate==0)
+			    	{
+				    	//need to improve, because it send one whole package in a loop
+						long temsum = 0;
+						long sendb;
+				    	encode_header(sendBuffer, ns->s_set->sent);
+				    	
 
-    int num = SendSet->num;
+				    	while(run){
+					    	//keep sending before put all data of a package into buf
+					    	while(ns->s_set->bsize>temsum){
+						    	sendb = send(ns->sockfd, sendBuffer+temsum, ns->s_set->sbufsize > ns->s_set->bsize-temsum ? ns->s_set->bsize - temsum: ns->s_set->sbufsize, 0);
+						    	if (sendb<=0)
+						    	{
+						    		//perror("error: ");
+						    		closeNetsock(ns);
+						    		run = 0;
+						    		pthread_mutex_lock(&numOfTakenMutex);
+									taken_thread_tcp--;
+									pthread_mutex_unlock(&numOfTakenMutex);
+						    		break;
+						    	}
+						    	temsum += sendb;
+						    	//printf("I have sent %ld bytes\n", sendb);
+						    }
 
-    for(long i = 0; i<num; i++){
-    	temsum = 0;
-    	memset(message,'\n',sizeof(message));
-    	encode_header(message, i);
+						    ns->s_set->sent += 1;
+						    //==============================
+						}
+						continue;
+			    	}
+				    else
+				    while(run)
+				    {
+						if (ns->s_set->sent < (long)(((double)ns->timer.Elapsed())/ns->s_set->bsize*ns->s_set->pktrate/1000))
+						{
+							//need to improve, because it send one whole package in a loop
+							long temsum = 0;
+							long sendb;
+					    	encode_header(sendBuffer, ns->s_set->sent);
 
-    	//keep sending before put all data of a package into buf
-    	while(bsize>temsum){
-    		if(pktrate>0)
-	    		msleep(1000/(pktrate/bufsize));
-	    	sendb = send(sockfd, message+temsum, bufsize>bsize-temsum ? bsize-temsum: bufsize, 0);
-	    	temsum += sendb;
-	    }
-    	sprintf(stat, "%s\n", send_stat_cal(timer.ElapseduSec(), i));
+					    	//keep sending before put all data of a package into buf
+					    	while(ns->s_set->bsize>temsum){
+						    	sendb = send(ns->sockfd, sendBuffer+temsum, ns->s_set->sbufsize > ns->s_set->bsize-temsum ? ns->s_set->bsize - temsum: ns->s_set->sbufsize, 0);
+						    	if (sendb<=0)
+						    	{
+						    		//perror("error: ");
+						    		closeNetsock(ns);
+						    		run = 0;
+						    		pthread_mutex_lock(&numOfTakenMutex);
+									taken_thread_tcp--;
+									pthread_mutex_unlock(&numOfTakenMutex);
+						    		break;
+						    	}
+						    	//printf("I have sent %ld bytes\n", sendb);
+						    	temsum += sendb;
+						    }
+
+						    ns->s_set->sent += 1;
+						    //==============================
+						}
+					}	
+				}
+				else
+				if (ns->np->proto==SOCK_DGRAM)
+				{
+					/*printf("num of package should be sent%ld\n", (long)(((double)ns->timer.Elapsed())/ns->s_set->bsize*ns->s_set->pktrate/1000));
+					printf("sent %ld package\n", ns->s_set->sent);
+					printf("time :%lds\n", ns->timer.Elapsed()/1000);*/
+					if (ns->s_set->pktrate==0)
+					{
+						//need to improve
+				    	long temsum = 0;
+				    	long sendb;
+				    	encode_header(sendBuffer, ns->s_set->sent);
+
+				    	while(run){
+				    	//keep sending before put all data of a package into buf
+					    	while(ns->s_set->bsize>temsum){
+						    	sendb = sendto(ns->sockfd, sendBuffer+temsum, ns->s_set->sbufsize > ns->s_set->bsize-temsum ? ns->s_set->bsize-temsum: ns->s_set->sbufsize, 0, (struct sockaddr *)(&(ns->clientInfo)),sizeof(ns->clientInfo));
+						    	if (sendb<=0)
+						    	{
+						    		//perror("error: ");
+						    		closeNetsock(ns);
+						    		run = 0;
+						    		pthread_mutex_lock(&numOfTakenMutex);
+									taken_thread_udp--;
+									pthread_mutex_unlock(&numOfTakenMutex);
+						    		break;
+						    	}
+						    	temsum += sendb;
+						    }
+
+					    	ns->s_set->sent += 1;
+					    	//===============
+					    }
+					}
+					else
+					while(run){
+						if (ns->s_set->sent < (long)(((double)ns->timer.Elapsed())/ns->s_set->bsize*ns->s_set->pktrate/1000))
+						{
+							//need to improve
+					    	long temsum = 0;
+					    	long sendb;
+					    	encode_header(sendBuffer, ns->s_set->sent);
+
+					    	//keep sending before put all data of a package into buf
+					    	while(ns->s_set->bsize>temsum){
+						    	sendb = sendto(ns->sockfd, sendBuffer+temsum, ns->s_set->sbufsize > ns->s_set->bsize-temsum ? ns->s_set->bsize-temsum: ns->s_set->sbufsize, 0, (struct sockaddr *)(&(ns->clientInfo)),sizeof(ns->clientInfo));
+						    	if (sendb<=0)
+						    	{
+						    		//perror("error: ");
+						    		closeNetsock(ns);
+						    		run = 0;
+						    		pthread_mutex_lock(&numOfTakenMutex);
+									taken_thread_udp--;
+									pthread_mutex_unlock(&numOfTakenMutex);
+						    		break;
+						    	}
+						    	temsum += sendb;
+						    }
+
+						    ns->s_set->sent += 1;
+						    //===============
+						}
+					}
+				}
+			}
+			else{
+				closeNetsock(ns);
+				if (ns->np->proto==SOCK_STREAM)
+				{
+					pthread_mutex_lock(&numOfTakenMutex);
+					taken_thread_tcp--;
+					pthread_mutex_unlock(&numOfTakenMutex);
+				}
+				else
+				if (ns->np->proto==SOCK_DGRAM)
+				{
+					pthread_mutex_lock(&numOfTakenMutex);
+					taken_thread_udp--;
+					pthread_mutex_unlock(&numOfTakenMutex);
+				}
+				run = 0;
+			}
+		
+		}
+	}
+
+
+	msleep(1000);
+	return 0;
+}
+
+void threadServer(){
+	//set up the netsock queue
+	NSQueue queue = {NULL, NULL, 0};
+
+	pthread_t *sockt = (pthread_t *)malloc(threadnum*sizeof(pthread_t));
+
+	for (int i = 0; i < threadnum; i++)
+	{
+		pthread_create(sockt+i, NULL, sockThread, (void *)&queue);
+	}
+
+	//start main thread
+	SendSet sendset[100];
+	RecvSet recvset[100];
+
+	Netsock ns[200];
+	int netsockmax = 0;
+
+	//set up the netsock
+	for (int i = 0; i < 200; i++)
+	{
+		(ns+i)->addrlen = sizeof((ns+i)->clientInfo);
+    	bzero(&((ns+i)->clientInfo),sizeof((ns+i)->clientInfo));
+	}
+	//==========================
+
+	char *sendBuffer = (char *) malloc(sizeof(char)*sbufsize);
+	char *recvBuffer = (char *) malloc(sizeof(char)*rbufsize);
+	memset(sendBuffer, '\0', sbufsize);
+	memset(recvBuffer, '\0', rbufsize);
+    
+    //max number of tcp client
+    int tcpClientSockfd[100];
+    int tcpClientMode[100];
+    int tcpmax = 0;
+
+    //udp client
+    struct sockaddr_in udpClientInfo[100];
+    for (int i = 0; i < 100; ++i)
+    {
+    	bzero(udpClientInfo+i,sizeof(struct sockaddr_in));
     }
-    msleep(stat_ms);
-    close(sockfd);
-}*/
+    int udpClientMode[100];
+    int udpmax = 0;
 
-void server(){
+    //for checking available tcp and udp socket
+    int available_tcp = 0;
+    int available_udp = 0;
+
+	//SOCKET SETUP
+	int listen_sockfd = 0, udpsockfd = 0;
+
+	listen_sockfd = socket(AF_INET , SOCK_STREAM , 0);
+    udpsockfd = socket(AF_INET , SOCK_DGRAM , 0);
+
+    if (listen_sockfd == -1 || udpsockfd == -1){
+        printf("Fail to create a socket.");
+        exit(1);
+    }
+
+	//sever socket的連線
+    struct sockaddr_in serverInfo,clientInfo;
+    socklen_t addrlen = sizeof(clientInfo);
+    bzero(&serverInfo,sizeof(serverInfo));
+    bzero(&clientInfo,sizeof(clientInfo));
+
+    serverInfo.sin_family = PF_INET;
+    struct hostent *he;
+    if ( (he = gethostbyname(hostname) ) == NULL ) {
+    	printf("Invalid hostname\n");
+      	exit(1); /* error */
+  	}
+    memcpy(&serverInfo.sin_addr, he->h_addr_list[0], he->h_length);
+    //serverInfo.sin_addr.s_addr = INADDR_ANY;
+    serverInfo.sin_port = htons(port);
+    bind(listen_sockfd,(struct sockaddr *)&serverInfo,sizeof(serverInfo));
+    bind(udpsockfd,(struct sockaddr *)&serverInfo,sizeof(serverInfo));
+    listen(listen_sockfd, 5);
+
+   	//select set up
+   	int max = 0;
+   	
+   	while(1){
+   		tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)(&(ns[netsockmax].clientInfo)), &(ns[netsockmax].addrlen));
+
+   		if ((taken_thread_tcp+taken_thread_udp+1)>=threadnum)
+   		{
+   			pthread_t *sockt = (pthread_t *)malloc(threadnum*sizeof(pthread_t));
+
+			for (int i = 0; i < threadnum; i++)
+			{
+				pthread_create(sockt+i, NULL, sockThread, (void *)&queue);
+			}
+
+			threadnum *= 2;
+   		}
+
+		if (recv(tcpClientSockfd[tcpmax], recvBuffer, rbufsize, 0)>0)
+		{
+			//set the ns
+			ns[netsockmax].np = request_decode(recvBuffer);
+			//=====================================
+
+			if (ns[netsockmax].np->mode==RECV)
+				{
+					ns[netsockmax].r_set = recvset_decode(recvBuffer+sizeof(struct Netprobe));
+				}
+			if (ns[netsockmax].np->mode==SEND)
+				{
+					ns[netsockmax].s_set = sendset_decode(recvBuffer+sizeof(struct Netprobe));
+				}
+
+			if(ns[netsockmax].np->proto==SOCK_STREAM){
+				ns[netsockmax].sockfd = tcpClientSockfd[tcpmax];
+				tcpmax++;
+				available_tcp++;
+			}
+			if(ns[netsockmax].np->proto==SOCK_DGRAM){
+				//close(tcpClientSockfd[tcpmax]);
+
+				ns[netsockmax].sockfd = udpsockfd;
+				udpClientInfo[udpmax] = clientInfo;
+				udpmax++;
+				available_udp++;
+
+				//we sleep for 1 second because I found it is too fast for client to respond when pktrate is 0
+				msleep(1000);
+			}
+			ns[netsockmax].timer.Start();
+			
+
+			//insert ns into queue
+			enqueue(&queue, ns+netsockmax);
+
+			netsockmax++;
+		}
+   	}
+}
+
+void selectServer(){
 	SendSet sendset[100];
 	RecvSet recvset[100];
 
@@ -566,7 +972,12 @@ int main(int argc, char** argv){
 	pthread_t t;
 	pthread_create(&t, NULL, threadfunc, NULL);
 
-	server();
+	//set mutex
+	pthread_mutex_init(&queueMutex, 0);
+
+	threadServer();
+
+	pthread_mutex_destroy(&queueMutex);
 
 	return 1;
 }
