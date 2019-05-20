@@ -975,11 +975,19 @@ int main(int argc, char** argv){
 	pthread_create(&t, NULL, threadfunc, NULL);
 
 	//set mutex
-	pthread_mutex_init(&queueMutex, 0);
+	if (mode==3)
+	{
+		selectServer();
+	}
+	else
+	if(mode==4)
+	{
+		pthread_mutex_init(&queueMutex, 0);
 
-	threadServer();
+		threadServer();
 
-	pthread_mutex_destroy(&queueMutex);
+		pthread_mutex_destroy(&queueMutex);
+	}
 
 	return 1;
 }
