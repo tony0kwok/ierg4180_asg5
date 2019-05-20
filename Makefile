@@ -1,21 +1,28 @@
+CC = g++
+CFLAGS = -std=c++11
+UNAME := $(shell uname)
 SERVER_OUTPUT = server
 MAIN_OUTPUT = main
 NETPROBE_OUTPUT = netprobe
 CLIENT_OUTPUT = client
+THREAD_LIB = thread.o
 
 all: server main client
 
 server: server.cpp
-	g++ -std=c++11 server_v2.cpp -lstdc++ -o ${SERVER_OUTPUT} -lpthread
+	${CC} ${CFLAGS} server_v2.cpp -o ${SERVER_OUTPUT} -lpthread ${THREAD_LIB}
 
 main: main.cpp
-	gcc main.cpp -lstdc++ -o ${MAIN_OUTPUT} -lpthread
+	${CC} main.cpp -o ${MAIN_OUTPUT} -lpthread
 
 client: client.cpp
-	gcc client.cpp -lstdc++ -o ${CLIENT_OUTPUT} -lpthread
+	${CC} client.cpp -o ${CLIENT_OUTPUT} -lpthread 
+
+tinythread: tinythread.cpp
+	${CC} -c ${CFLAGS} -o ${THREAD_LIB} tinythread.cpp
 
 netprobe: netprobe.cpp
-	gcc netprobe.cpp -lstdc++ -o ${NETPROBE_OUTPUT} 
+	${CC} -c ${CFLAGS} -pthread -lrt -o ${NETPROBE_LIB} netprobe.cpp
 
 clean: 
 	rm ${SERVER_OUTPUT} ${MAIN_OUTPUT} ${CLIENT_OUTPUT}

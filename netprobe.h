@@ -27,6 +27,25 @@ typedef struct netsock{
 	ES_Timer timer;
 } Netsock;
 
+typedef struct netsock_queue_node{
+	netsock *ns;
+	struct netsock_queue_node *next;
+} NSNode;
+
+typedef struct netsock_queue_head{
+	NSNode *front;
+	NSNode *rear;
+	int num;
+} NSQueue;
+
+/*typedef struct thread_monitor{
+	int threadnum;
+	pthread_t *sockt;
+	NSQueue *queue;
+} Thread_monitor;*/
+
+
+
 //char *request_encode(struct Netprobe np);
 
 //struct Netprobe *request_decode(char *buffer);
