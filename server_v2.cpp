@@ -151,6 +151,8 @@ char hostname[100];
 
 char *port_num;
 
+int inet_type;
+
 void encode_header(char *buffer, int number){
 	//support maximum sequence number 10000 packages
 	sprintf(buffer, "%d%d%d%d%d%d%d%d", number/10000000, (number%10000000)/1000000, (number%1000000)/100000, (number%100000)/10000, (number%10000)/1000, (number%1000)/100, (number%100)/10, number%10);
@@ -185,9 +187,13 @@ int setting(int argc, char** argv){
 
 	mode = 4;	//3 = select, 4 = thread
 
+	inet_type = AF_UNSPEC;
+
 	const char *optstring = "m:p:u:f:l:s:o:";
     int c;
     struct option opts[] = {
+    	{"ipv4", 0, NULL, '4'},
+    	{"ipv6", 0, NULL, '6'},
         {"stat", 1, NULL, 'm'},
         {"lport", 1, NULL, 'p'},
         {"sbufsize", 1, NULL, 'u'},
@@ -198,6 +204,12 @@ int setting(int argc, char** argv){
     };
     while((c = getopt_long_only(argc, argv, optstring, opts, NULL)) != -1) {
         switch(c) {
+        	case '4':
+        		inet_type = AF_INET;
+        		break;
+        	case '6':
+        		inet_type = AF_INET6;
+        		break;
         	case 'o':
         		threadnum = atoi(optarg);
         	case 's':
@@ -576,7 +588,7 @@ void threadServer(){
 
     // 以 memset 清空 hints 結構
     memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_family = AF_INET6; // 使用 IPv4 or IPv6
+    hints.ai_family = inet_type; // 使用 IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; // 串流 Socket
     hints.ai_flags = AI_NUMERICSERV; // 將 getaddrinfo() 第 2 參數 (PORT_NUM) 視為數字
 

@@ -105,6 +105,8 @@ char hostname[100];
 int rbufsize;
 int sbufsize;
 
+int inet_type;
+
 
 void encode_header(char *buffer, int number){
 	//support maximum sequence number 10000 packages
@@ -142,6 +144,8 @@ int setting(int argc, char** argv){
 
 	num = 999999999;
 
+	inet_type = AF_UNSPEC;
+
 	strcpy(hostname, "localhost");
 
 	const char *optstring = "srem:p:k:b:u:t:n:o:h:l:";
@@ -159,10 +163,18 @@ int setting(int argc, char** argv){
         {"pktnum", 1, NULL , 'n'},
         {"proto", 1, NULL, 'o'},
         {"rhost", 1, NULL, 'h'},
-        {"lhost", 1, NULL, 'l'}
+        {"lhost", 1, NULL, 'l'},
+        {"ipv4", 0, NULL, '4'},
+        {"ipv6", 0, NULL, '6'},
     };
     while((c = getopt_long_only(argc, argv, optstring, opts, NULL)) != -1) {
         switch(c) {
+        	case '4':
+        		inet_type = AF_INET;
+        		break;
+        	case '6':
+        		inet_type = AF_INET6;
+        		break;
         	case 'l':
         		strcpy(hostname, optarg);
         		break;
@@ -497,7 +509,7 @@ void client(){
 
     // 以 memset 清空 hints 結構
     memset(&hints, 0, sizeof(struct addrinfo));
-    hints.ai_family = AF_INET6; // 使用 IPv4 or IPv6
+    hints.ai_family = inet_type; // 使用 IPv4 or IPv6
     hints.ai_socktype = SOCK_STREAM; // 串流 Socket
     hints.ai_flags = AI_NUMERICSERV; // 將 getaddrinfo() 第 2 參數 (PORT_NUM) 視為數字
 
@@ -507,7 +519,7 @@ void client(){
         errExit((char *) gai_strerror(gaiStatus));
 
     //get udp address
-    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_socktype = SOCK_DGRAM;
     if ((gaiStatus = getaddrinfo(strcmp(hostname, "localhost")==0?NULL:hostname, port_num, &hints, &udp_result)) != 0)
         errExit((char *) gai_strerror(gaiStatus));
 
@@ -537,11 +549,15 @@ void client(){
 
     printf("loading\n");
 
+    inet_ntop(inet_type, (void*)&(((struct sockaddr_in *)(result->ai_addr))->sin_addr), port_num, INET6_ADDRSTRLEN);
+
+    printf("host ip: %s\n", port_num);
+
     //Request====================
 	//send request to tell server TCP or UDP, SEND or RECV
     int err = connect(tcp_sock,result->ai_addr, result->ai_addrlen);
     if(err==-1){
-        printf("Connection error");
+        perror("Connection error");
         exit(1);
     }
 
@@ -571,7 +587,7 @@ void client(){
     struct Netprobe *new_np = request_decode(request_buf);
     //if mode is RECV, set host to SEND mode
     //printf("hostmode = %d, proto = %d\n", new_np->mode?0:1, new_np->proto);
-    printf("host ip: %s\n", inet_ntoa(info.sin_addr));
+    
 
     memset(message,'\n',sizeof(message));
     memcpy(message, request_buf, sizeof(struct Netprobe));
@@ -776,6 +792,7 @@ void client(){
 
 int main(int argc, char** argv){
 	setting(argc, argv);
+	//printf("setting done\n");
 
 	//print the stat
 	pthread_t t;
