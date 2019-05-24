@@ -12,6 +12,8 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <pthread.h>
+#include <errno.h>
+#include <sys/errno.h>
 
 #include "netprobe.h"
 #include "tinythread.h"
@@ -20,6 +22,12 @@ using namespace tthread;
 
 #define SEND 1
 #define RECV 0
+
+void errExit(char *reason) {
+    char *buff = reason ? reason : strerror(errno);
+    printf("Error: %s", buff);
+    exit(EXIT_FAILURE);
+}
 
 //NetProbe functions
 char *request_encode(struct Netprobe np){
@@ -141,6 +149,8 @@ long rbufsize;
 long sbufsize;
 char hostname[100];
 
+char *port_num;
+
 void encode_header(char *buffer, int number){
 	//support maximum sequence number 10000 packages
 	sprintf(buffer, "%d%d%d%d%d%d%d%d", number/10000000, (number%10000000)/1000000, (number%1000000)/100000, (number%100000)/10000, (number%10000)/1000, (number%1000)/100, (number%100)/10, number%10);
@@ -157,6 +167,8 @@ int setting(int argc, char** argv){
 	char tony[] = "127.0.0.1";
 	strcpy(address,tony);
 	port = 4180;
+	port_num = (char *)malloc(100);
+	strcpy(port_num, "4180");
 
 	stat_ms = 500;
 	memset(stat, '\0', sizeof(stat));
@@ -205,6 +217,7 @@ int setting(int argc, char** argv){
         		break;
             case 'p':
                 port = atol(optarg);
+                strcpy(port_num, optarg);
                 break;
             case 'm':
             	stat_ms = atol(optarg);
@@ -556,8 +569,29 @@ void threadServer(){
 	//SOCKET SETUP
 	int listen_sockfd = 0, udpsockfd = 0;
 
-	listen_sockfd = socket(AF_INET , SOCK_STREAM , 0);
-    udpsockfd = socket(AF_INET , SOCK_DGRAM , 0);
+	//get ipv6 address
+	int gaiStatus; // getaddrinfo 狀態碼
+    struct addrinfo hints; // hints 參數，設定 getaddrinfo() 的回傳方式
+    struct addrinfo *result, *udp_result; // getaddrinfo() 執行結果的 addrinfo 結構指標
+
+    // 以 memset 清空 hints 結構
+    memset(&hints, 0, sizeof(struct addrinfo));
+    hints.ai_family = AF_INET6; // 使用 IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM; // 串流 Socket
+    hints.ai_flags = AI_NUMERICSERV; // 將 getaddrinfo() 第 2 參數 (PORT_NUM) 視為數字
+
+    // 以 getaddrinfo 透過 DNS，取得 addrinfo 鏈結串列 (Linked List)
+    // 以從中取得 Host 的 IP 位址
+    if ((gaiStatus = getaddrinfo(strcmp(hostname, "localhost")==0?NULL:hostname, port_num, &hints, &result)) != 0)
+        errExit((char *) gai_strerror(gaiStatus));
+
+    //get udp address
+    hints.ai_socktype = SOCK_DGRAM;
+    if ((gaiStatus = getaddrinfo(strcmp(hostname, "localhost")==0?NULL:hostname, port_num, &hints, &udp_result)) != 0)
+        errExit((char *) gai_strerror(gaiStatus));
+
+	listen_sockfd = socket(result->ai_family, result->ai_socktype, 0);
+    udpsockfd = socket(udp_result->ai_family, udp_result->ai_socktype, 0);
 
     if (listen_sockfd == -1 || udpsockfd == -1){
         printf("Fail to create a socket.");
@@ -579,8 +613,8 @@ void threadServer(){
     memcpy(&serverInfo.sin_addr, he->h_addr_list[0], he->h_length);
     //serverInfo.sin_addr.s_addr = INADDR_ANY;
     serverInfo.sin_port = htons(port);
-    bind(listen_sockfd,(struct sockaddr *)&serverInfo,sizeof(serverInfo));
-    bind(udpsockfd,(struct sockaddr *)&serverInfo,sizeof(serverInfo));
+    bind(listen_sockfd,result->ai_addr, result->ai_addrlen);
+    bind(udpsockfd,udp_result->ai_addr, udp_result->ai_addrlen);
     listen(listen_sockfd, 5);
 
    	//select set up
@@ -588,7 +622,7 @@ void threadServer(){
    	
    	while(1){
    		tcpClientSockfd[tcpmax] = accept(listen_sockfd,(struct sockaddr *)(&(ns[netsockmax].clientInfo)), &(ns[netsockmax].addrlen));
-
+   		printf("TCP connection established\n");
    		if ((taken_thread_tcp+taken_thread_udp+1)>=threadnum)
    		{
    			pthread_t *sockt = (pthread_t *)malloc(threadnum*sizeof(pthread_t));

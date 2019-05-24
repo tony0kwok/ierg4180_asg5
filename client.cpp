@@ -12,11 +12,19 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <pthread.h>
+#include <errno.h>
+#include <sys/errno.h>
 
 #include "netprobe.h"
 
 #define SEND 1
 #define RECV 0
+
+void errExit(char *reason) {
+    char *buff = reason ? reason : strerror(errno);
+    printf("Error: %s", buff);
+    exit(EXIT_FAILURE);
+}
 
 //NetProbe functions
 char *request_encode(struct Netprobe np){
@@ -78,6 +86,7 @@ int protocol;
 int mode;
 char address[40];
 int port;
+char *port_num;
 
 int stat_ms;
 char stat[200];
@@ -116,6 +125,8 @@ int setting(int argc, char** argv){
 	char tony[] = "127.0.0.1";
 	strcpy(address,tony);
 	port = 4180;
+	port_num = (char *)malloc(100);
+	strcpy(port_num, "4180");
 
 	stat_ms = 500;
 	memset(stat, '\0', sizeof(stat));
@@ -190,6 +201,7 @@ int setting(int argc, char** argv){
         		break;
             case 'p':
                 port = atoi(optarg);
+                strcpy(port_num, optarg);
                 break;
             case 'm':
             	stat_ms = atoi(optarg);
@@ -477,10 +489,30 @@ void client(){
 			//printf("for loop in %d\n", i);
 	    }
 	}
-    
 
-    int sockfd = socket(domain, type, protocol);
-	int tcp_sock = socket(domain, SOCK_STREAM, protocol);
+	//get ipv6 address
+	int gaiStatus; // getaddrinfo 狀態碼
+    struct addrinfo hints; // hints 參數，設定 getaddrinfo() 的回傳方式
+    struct addrinfo *result, *udp_result; // getaddrinfo() 執行結果的 addrinfo 結構指標
+
+    // 以 memset 清空 hints 結構
+    memset(&hints, 0, sizeof(struct addrinfo));
+    hints.ai_family = AF_INET6; // 使用 IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM; // 串流 Socket
+    hints.ai_flags = AI_NUMERICSERV; // 將 getaddrinfo() 第 2 參數 (PORT_NUM) 視為數字
+
+    // 以 getaddrinfo 透過 DNS，取得 addrinfo 鏈結串列 (Linked List)
+    // 以從中取得 Host 的 IP 位址
+    if ((gaiStatus = getaddrinfo(strcmp(hostname, "localhost")==0?NULL:hostname, port_num, &hints, &result)) != 0)
+        errExit((char *) gai_strerror(gaiStatus));
+
+    //get udp address
+    hints.ai_socktype = SOCK_STREAM;
+    if ((gaiStatus = getaddrinfo(strcmp(hostname, "localhost")==0?NULL:hostname, port_num, &hints, &udp_result)) != 0)
+        errExit((char *) gai_strerror(gaiStatus));
+
+    int sockfd = socket(udp_result->ai_family, udp_result->ai_socktype, protocol);
+	int tcp_sock = socket(result->ai_family, result->ai_socktype, protocol);
 
 	if (sockfd == -1||tcp_sock == -1){
         printf("Fail to create a socket.");
@@ -507,13 +539,13 @@ void client(){
 
     //Request====================
 	//send request to tell server TCP or UDP, SEND or RECV
-    int err = connect(tcp_sock,(struct sockaddr *)&info,sizeof(info));
+    int err = connect(tcp_sock,result->ai_addr, result->ai_addrlen);
     if(err==-1){
         printf("Connection error");
         exit(1);
     }
 
-    getsockname(tcp_sock, (sockaddr *)&myaddr, &myaddr_addrlen);
+    getsockname(tcp_sock, (struct sockaddr *)&myaddr, &myaddr_addrlen);
 
     int count = 0;
     int sendb;
@@ -620,8 +652,7 @@ void client(){
 		if (type==SOCK_DGRAM)
 		{
 			close(tcp_sock);
-			if (bind(sockfd, (struct sockaddr *)&myaddr,
-	                            sizeof(myaddr)) <0) {
+			if (bind(sockfd, result->ai_addr, result->ai_addrlen) <0) {
 	            perror("bind failed!");
 	            exit(1);
 	    	}
@@ -703,8 +734,7 @@ void client(){
 		if (type==SOCK_DGRAM)
 		{
 			close(tcp_sock);
-			if (bind(sockfd, (struct sockaddr *)&myaddr,
-	                            sizeof(myaddr)) <0) {
+			if (bind(sockfd, result->ai_addr, result->ai_addrlen) <0) {
 	            perror("bind failed!");
 	            exit(1);
 	    	}
